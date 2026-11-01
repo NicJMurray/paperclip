@@ -30,7 +30,7 @@ function render() {
   const words = state.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
   $('items').replaceChildren(...items.map(card));
-  $('count').textContent = `${items.length} ${items.length === 1 ? 'thing' : 'things'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ' worth keeping'}`;
+  $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;
   $('message').replaceChildren();
