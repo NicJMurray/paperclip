@@ -4,13 +4,19 @@ const label = value => value.charAt(0).toUpperCase() + value.slice(1);
 const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
 function safeURL(value) { try { const u = new URL(value); return ['https:','http:'].includes(u.protocol) && !u.username && !u.password ? u : null; } catch { return null; } }
 function card(item) {
-  const article = element('article','card');
+  const url = safeURL(item.url);
+  const article = element('article',url ? 'card card--link' : 'card');
+  let thumbnail = null;
   if (item.kind === 'image') {
-    const link = element('a','image-link'); link.href = `/media/${encodeURIComponent(item.id)}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const img = element('img'); img.src = link.href; img.alt = item.summary || item.title || 'Saved image'; img.loading = 'lazy'; img.decoding = 'async'; link.append(img); article.append(link);
+    const mediaURL = `/media/${encodeURIComponent(item.id)}`;
+    const link = element('a','image-link'); link.href = url ? url.href : mediaURL; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    if (url) link.setAttribute('aria-label',item.title || url.hostname);
+    const img = element('img'); img.src = mediaURL; img.alt = url ? '' : item.title || 'Saved image'; img.loading = 'lazy'; img.decoding = 'async'; link.append(img);
+    if (url) thumbnail = link; else article.append(link);
   }
   const content = element('div','card-content'), head = element('div','card-heading');
-  head.append(element('span','category',item.category || 'other')); const url = safeURL(item.url);
+  head.append(element('span','category',item.category || 'other'));
+  if (thumbnail) head.append(thumbnail);
   if (url) head.append(element('span','arrow','↗'));
   const h2 = element('h2');
   if (url) { const a = element('a','',item.title || url.hostname); a.href = url.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; h2.append(a); } else h2.textContent = item.title || 'A small discovery';

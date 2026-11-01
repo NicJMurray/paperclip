@@ -19,7 +19,7 @@ Android controls the share-sheet order. Long-press Paperclip and choose **Pin** 
 - Original supported-image bytes are kept, including any embedded metadata. Do not share private images or location metadata you do not intend to make public.
 - Text is limited to 32,000 characters. Videos, audio and arbitrary files are outside this first version.
 
-The incoming inbox is private. A scheduled ChatGPT task classifies new items into articles, tools, memes, images, videos (links), reference, notes or other, adds a title, short description and tags, then publishes them. The website reads published records directly, so weekly sorting needs no redeployment. Uncertain or apparently private material is held for review. This is a best-effort safeguard, not a guarantee: share only material you are comfortable publishing.
+The incoming inbox is private. A scheduled ChatGPT task classifies new items into articles, tools, memes, images, videos (links), reference, notes or other, preserves source headlines and publisher descriptions, adds categories and tags, then publishes them. Link cards use small thumbnails; standalone images retain the larger image view. The website reads published records directly, so weekly sorting needs no redeployment. Uncertain or apparently private material is held for review. This is a best-effort safeguard, not a guarantee: share only material you are comfortable publishing.
 
 ## Small by design
 
