@@ -78,6 +78,7 @@ async function capture(request, env) {
   catch { throw new HttpError(400, 'Expected a multipart share.'); }
   const id = form.get('id');
   if (typeof id !== 'string' || !UUID.test(id)) throw new HttpError(400, 'Missing share ID.');
+  if (await env.DB.prepare('SELECT id FROM discarded_items WHERE id = ?').bind(id).first()) throw new HttpError(410, 'Removed from queue.');
   // Retrying a durable local job never creates a duplicate.
   if (await env.DB.prepare('SELECT id FROM items WHERE id = ?').bind(id).first()) return json({ id, saved: true });
   const text = form.get('text') || '', title = form.get('title') || '';
@@ -97,15 +98,38 @@ async function capture(request, env) {
   } else if (file) throw new HttpError(400, 'Invalid image.');
   const url = findURL(text);
   if (!image && !text.trim()) throw new HttpError(400, 'Nothing to save.');
-  const statements = [env.DB.prepare('INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(id, image ? 'image' : url ? 'link' : 'text', text, title, url, mime, image?.byteLength || 0, preview)];
+  const statements = [env.DB.prepare('INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM discarded_items WHERE id = ?)').bind(id, image ? 'image' : url ? 'link' : 'text', text, title, url, mime, image?.byteLength || 0, preview, id)];
   // D1 has a per-value limit: bounded chunks preserve the original image, atomically.
-  if (image) for (let offset = 0, part = 0; offset < image.byteLength; offset += 256 * 1024, part++) statements.push(env.DB.prepare('INSERT INTO image_chunks (item_id, part, data) VALUES (?, ?, ?)').bind(id, part, Buffer.from(image.subarray(offset, offset + 256 * 1024)).toString('base64')));
+  if (image) for (let offset = 0, part = 0; offset < image.byteLength; offset += 256 * 1024, part++) statements.push(env.DB.prepare('INSERT INTO image_chunks (item_id, part, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM items WHERE id = ?)').bind(id, part, Buffer.from(image.subarray(offset, offset + 256 * 1024)).toString('base64'), id));
   try { await env.DB.batch(statements); }
   catch (error) {
     // Two workers may receive the same retry concurrently. The batch rolls back fully.
     if (!await env.DB.prepare('SELECT id FROM items WHERE id = ?').bind(id).first()) throw error;
   }
+  if (await env.DB.prepare('SELECT id FROM discarded_items WHERE id = ?').bind(id).first()) throw new HttpError(410, 'Removed from queue.');
   return json({ id, saved: true }, 201);
+}
+
+async function waiting(request, env) {
+  await authenticate(request, env);
+  const [page, count] = await env.DB.batch([
+    env.DB.prepare("SELECT id,created_at,kind,url,shared_title,status FROM items WHERE status IN ('pending','held') ORDER BY created_at DESC,id DESC LIMIT 3"),
+    env.DB.prepare("SELECT count(*) AS total FROM items WHERE status IN ('pending','held')"),
+  ]);
+  return json({ items: page.results.map(row => ({ id: row.id, created_at: row.created_at, kind: row.kind, url: row.url?.slice(0,2048) || null, title: row.shared_title || (row.kind === 'image' ? 'Image' : 'Text'), status: row.status })), total: count.results[0].total });
+}
+
+async function discard(request, env, id) {
+  await authenticate(request, env);
+  if (!UUID.test(id)) throw new HttpError(400, 'Invalid queue ID.');
+  // Remember removals even if an offline upload arrives later. Publication and
+  // removal serialize atomically: this endpoint never deletes published records.
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO discarded_items(id) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM items WHERE id = ? AND status = 'published') ON CONFLICT(id) DO NOTHING").bind(id,id),
+    env.DB.prepare("DELETE FROM items WHERE id = ? AND status IN ('pending','held')").bind(id),
+  ]);
+  if (!await env.DB.prepare('SELECT id FROM discarded_items WHERE id = ?').bind(id).first()) throw new HttpError(409, 'This item has already been published.');
+  return json({ id, removed: true });
 }
 
 async function collection(request, env) {
@@ -139,6 +163,8 @@ export default {
       const { pathname } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/pair') return await pair(request, env);
       if (request.method === 'POST' && pathname === '/api/capture') return await capture(request, env);
+      if (request.method === 'GET' && pathname === '/api/queue') return await waiting(request, env);
+      if (request.method === 'DELETE' && pathname.startsWith('/api/queue/')) return await discard(request, env, pathname.slice(11));
       if (request.method === 'GET' && pathname === '/api/device') { await authenticate(request, env); return json({ connected: true }); }
       if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);

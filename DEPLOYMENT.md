@@ -14,7 +14,7 @@ Pages reuses the account’s existing GitHub authorisation. A separate Workers B
 
 ## Database migrations
 
-Apply `server/migrations/0001_initial.sql` to the named D1 database before the first deployment. Future schema changes should be additive. Use `npm run db:remote` with a D1-capable Cloudflare credential, or the connected Cloudflare API query endpoint. A code push does not run database migrations automatically.
+Apply the SQL files in `server/migrations/` in filename order before deploying code that needs them. `0001_initial.sql` creates the archive; `0002_queue_removal.sql` adds durable removal IDs so a delayed upload cannot recreate a removed item. Future schema changes should be additive. Use `npm run db:remote` with a D1-capable Cloudflare credential, or the connected Cloudflare API query endpoint. A code push does not run database migrations automatically.
 
 ## Pair a phone
 
@@ -33,6 +33,12 @@ UPDATE devices SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = 
 ```
 
 Generate a new pairing code to reconnect. The phone retains failed uploads and can retry them after pairing again. The setup screen shows connection and outbox state, without adding steps to normal sharing.
+
+## Private queue
+
+`GET /api/queue` requires a device token and returns only the latest three pending/held records plus their total count. It does not return images, previews or device credentials. `DELETE /api/queue/:id` uses the same authentication and atomically records a removal ID and deletes an unpublished item with its image chunks. Published records return 409 and are preserved. Repeating a removal is safe; an upload arriving later with the removed UUID returns 410. Original capture UUIDs are never reused for a deliberate new share.
+
+Android keeps removal markers separately from its outbox files, so an upload finishing concurrently cannot erase a removal request. WorkManager retries removal when connected. Server queue data is kept in memory while the app is open and refreshed only in the foreground. The public website cannot list or modify the private queue.
 
 ## Weekly ChatGPT task
 

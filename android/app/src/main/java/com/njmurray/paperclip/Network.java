@@ -35,6 +35,12 @@ final class Network {
     static Response check(String token) throws Exception {
         HttpURLConnection c=connection("/api/device",token);try{return response(c);}finally{c.disconnect();}
     }
+    static Response queue(String token) throws Exception {
+        HttpURLConnection c=connection("/api/queue",token);try{return response(c);}finally{c.disconnect();}
+    }
+    static Response remove(String id,String token) throws Exception {
+        HttpURLConnection c=connection("/api/queue/"+id,token);try{c.setRequestMethod("DELETE");return response(c);}finally{c.disconnect();}
+    }
     private static void write(OutputStream out,String text)throws IOException{out.write(text.getBytes(StandardCharsets.UTF_8));}
     private static void field(OutputStream out,String boundary,String name,String value)throws IOException{
         write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"\r\n\r\n"+value+"\r\n");

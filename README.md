@@ -1,6 +1,6 @@
 # Paperclip
 
-Share it. Keep going. A small native Android share target and a public collection at **https://paperclip.njmurray.com/**.
+A native Android share target and a public collection at **https://paperclip.njmurray.com/**.
 
 ## On your phone
 
@@ -9,6 +9,10 @@ Share it. Keep going. A small native Android share target and a public collectio
 3. In any other app, choose **Share → Paperclip**. That is the whole save flow. You can also choose Paperclip from the selected-text actions where the sending app supports Android’s standard menu.
 
 There is no category selector, tag form, or confirmation screen. “Queued” means the phone has a durable copy; uploads run with WorkManager whenever connected. Uninstalling the app or clearing its storage removes unsent items. Open Paperclip to check the queue, check the connection or retry uploads. Keep the pairing code out of GitHub: it is a one-time credential, not the APK.
+
+The app shows the three most recent waiting items, combining uploads on this phone with the private server inbox. Rows show the URL or image name and whether they are waiting to upload, waiting to sort, or held. Tap **×** to remove a waiting item. Removal requests persist offline and sync when connected; if sorting publishes the item first, the app reports that it was already published and does not delete the public entry. The server inbox requires a connection to refresh; the app keeps the last fetched list while it stays open.
+
+Website updates appear automatically. For Android updates, install the newer APK over the existing app using the same signing key. Your connection and outbox remain in place; do not uninstall first. Version 1.1 adds the queue list and removal controls.
 
 Android controls the share-sheet order. Long-press Paperclip and choose **Pin** if your phone supports it. The app cannot force itself into the first position or add a Share action to another app that does not offer one.
 
@@ -39,15 +43,16 @@ npm run db:local
 npm run dev
 ```
 
-Node 22+ is recommended. Tests run against the real local Workers/D1 runtime and check private/public boundaries, single-use pairing, device revocation, retries, original image bytes, validation and pagination. Compatibility is pinned to 2026-10-30, the latest date supported by the runtime available during setup.
+Node 22+ is recommended. Tests run against the real local Workers/D1 runtime and check private/public boundaries, single-use pairing, device revocation, retries, original image bytes, validation, pagination, and queue removal including upload races. Compatibility is pinned to 2026-10-30, the latest date supported by the runtime available during setup.
 
 Build Android with Android SDK 35, Java 17+ and the checked-in Gradle wrapper:
 
 ```sh
 cd android
 ./gradlew assembleDebug
+./gradlew testReleaseUnitTest
 ```
 
-For an installable release with the same signature as the first APK, set `PAPERCLIP_KEYSTORE` and `PAPERCLIP_STORE_PASSWORD`, keep key alias `paperclip`, then run `./gradlew assembleRelease`. Increment `versionCode` for updates. The owner’s signing backup is supplied separately and must never be committed. A different signing key requires uninstalling the previous app, which also deletes its queue and connection.
+Android unit tests use Robolectric to check the three-row list, URL/image labels and durable removal requests. For an installable release with the same signature as the first APK, set `PAPERCLIP_KEYSTORE` and `PAPERCLIP_STORE_PASSWORD`, keep key alias `paperclip`, then run `./gradlew assembleRelease`. Increment `versionCode` for updates. The owner’s signing backup is supplied separately and must never be committed. A different signing key requires uninstalling the previous app, which also deletes its queue and connection.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure, pairing/revocation and scheduled publishing, and [CURATION.md](CURATION.md) for the task’s rules.

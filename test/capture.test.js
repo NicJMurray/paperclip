@@ -10,8 +10,10 @@ const call = (path, options) => mf.dispatchFetch('https://paperclip.test'+path,o
 before(async()=>{
   mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: new URL('../dist/_worker.js',import.meta.url).pathname, compatibilityDate:'2026-10-30', compatibilityFlags:['nodejs_compat'], d1Databases:{DB:'paperclip-test'} }));
   db = await mf.getD1Database('DB');
-  const sql = await readFile(new URL('../server/migrations/0001_initial.sql',import.meta.url),'utf8');
-  for (const statement of sql.split(';').map(s=>s.trim()).filter(Boolean)) await db.prepare(statement).run();
+  for (const file of ['0001_initial.sql','0002_queue_removal.sql']) {
+    const sql = await readFile(new URL('../server/migrations/'+file,import.meta.url),'utf8');
+    for (const statement of sql.split(';').map(s=>s.trim()).filter(Boolean)) await db.prepare(statement).run();
+  }
   const code='a'.repeat(32);
   await db.prepare('INSERT INTO pairing_codes(code_hash,expires_at) VALUES (?,?)').bind(sha(code),'2099-01-01T00:00:00.000Z').run();
   const pair=await call('/api/pair',{method:'POST',body:JSON.stringify({code})});assert.equal(pair.status,201);token=(await pair.json()).token;
@@ -61,4 +63,44 @@ test('searches and tag filters cover the full archive and exclude private rows',
   const data=await (await call('/api/items?q=rare+telescope&tag=astronomy&category=reference')).json();assert.deepEqual(data.items.map(x=>x.id),[id]);assert.ok(data.categories.includes('notes'));
   assert.equal((await (await call('/api/items?q='+encodeURIComponent("' OR 1=1 --"))).json()).items.length,0);
   assert.equal((await (await call('/api/items?q=A+shared+find')).json()).items.length,0);
+});
+
+const privateQueue = () => call('/api/queue',{headers:{Authorization:`Bearer ${token}`}});
+const discard = id => call('/api/queue/'+id,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+test('private queue returns only the latest three unpublished items',async()=>{
+  assert.equal((await call('/api/queue')).status,401);
+  const baseline=(await db.prepare("SELECT count(*) n FROM items WHERE status IN ('pending','held')").first()).n;
+  const ids=Array.from({length:5},()=>randomUUID());
+  await db.batch(ids.map((id,i)=>db.prepare("INSERT INTO items(id,created_at,kind,status,shared_title,url) VALUES (?,?,'link',?,?,'https://example.org/queue')").bind(id,`2099-01-0${i+1}T00:00:00.000Z`,i===4?'held':'pending','Source title '+i)));
+  const result=await (await privateQueue()).json();assert.deepEqual(result.items.map(x=>x.id),ids.slice(2).reverse());assert.equal(result.total,baseline+5);
+  assert.equal(result.items[0].status,'held');assert.equal(result.items[0].title,'Source title 4');assert.equal(result.items[0].shared_text,undefined);assert.equal(result.items[0].image_preview,undefined);
+});
+test('removing a waiting image deletes bytes and prevents upload retries recreating it',async()=>{
+  const id=randomUUID(),image=Buffer.from([137,80,78,71,13,10,26,10,0,0,0]);
+  assert.equal((await send(form(id,'',image))).status,201);
+  assert.equal((await call('/api/queue/'+id,{method:'DELETE'})).status,401);
+  assert.ok(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first());
+  assert.equal((await discard(id)).status,200);assert.equal((await discard(id)).status,200);
+  assert.equal(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first(),null);
+  assert.equal((await db.prepare('SELECT count(*) n FROM image_chunks WHERE item_id=?').bind(id).first()).n,0);
+  assert.equal((await send(form(id,'',image))).status,410);
+});
+test('offline removals are remembered before an upload arrives',async()=>{
+  const id=randomUUID();assert.equal((await discard(id)).status,200);assert.equal((await send(form(id))).status,410);
+  assert.equal(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first(),null);
+  assert.equal((await db.prepare("UPDATE items SET status='published' WHERE id=? AND status='pending'").bind(id).run()).meta.changes,0);
+});
+test('queue removal cannot delete an already published item',async()=>{
+  const id=randomUUID();await db.prepare("INSERT INTO items(id,kind,status,title) VALUES (?,'text','published','Already published')").bind(id).run();
+  assert.equal((await discard(id)).status,409);assert.equal((await db.prepare('SELECT status FROM items WHERE id=?').bind(id).first()).status,'published');
+  assert.equal(await db.prepare('SELECT id FROM discarded_items WHERE id=?').bind(id).first(),null);
+});
+test('racing removal and capture leave no item or orphan image chunks',async()=>{
+  for(let i=0;i<4;i++){
+    const id=randomUUID(),image=Buffer.from([137,80,78,71,13,10,26,10,0,0,0]);
+    const [capture,removed]=await Promise.all([send(form(id,'Race test',image)),discard(id)]);
+    assert.ok([201,410].includes(capture.status),await capture.text());assert.equal(removed.status,200);
+    assert.equal(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first(),null);
+    assert.equal((await db.prepare('SELECT count(*) n FROM image_chunks WHERE item_id=?').bind(id).first()).n,0);
+  }
 });

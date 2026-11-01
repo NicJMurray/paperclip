@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import android.widget.Toast;
 import java.io.*;
 import java.util.*;
@@ -53,10 +55,11 @@ public class ShareActivity extends Activity {
     private void save(String text,String title,Uri uri)throws Exception{
         String id=UUID.randomUUID().toString();File staging=new File(Queue.root(this),"."+id);if(!staging.mkdir())throw new IOException("Not enough space on this phone.");
         try{
-            JSONObject meta=new JSONObject().put("id",id).put("text",text).put("title",title);
+            JSONObject meta=new JSONObject().put("id",id).put("text",text).put("title",title).put("created_at",System.currentTimeMillis());
             if(uri!=null){
                 // Never read arbitrary filesystem paths supplied by another app.
                 if(!"content".equals(uri.getScheme()))throw new IOException("This app did not provide a readable image.");
+                if(title.trim().isEmpty())meta.put("title",imageName(uri));
                 String type=getContentResolver().getType(uri);if(type==null||!type.startsWith("image/"))throw new IOException("Paperclip saves links, text and images.");
                 File image=new File(staging,"image");
                 try(InputStream in=getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(image)){
@@ -79,6 +82,14 @@ public class ShareActivity extends Activity {
             File queued=new File(Queue.root(this),id);if(!staging.renameTo(queued))throw new IOException("Could not store this share on the phone.");
             Queue.schedule(getApplicationContext(),id,false);
         }finally{if(staging.exists())Queue.remove(staging);}
+    }
+    private String imageName(Uri uri){
+        try(Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst()){
+                String name=cursor.getString(0);if(name!=null&&!name.trim().isEmpty())return name.substring(0,Math.min(name.length(),500));
+            }
+        }catch(Exception ignored){}
+        return "Image";
     }
     private Bitmap decode(File file,int bound){
         try{
