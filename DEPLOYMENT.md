@@ -46,4 +46,4 @@ To unpublish immediately, set the item’s status to `held`; the API and media r
 
 Run `npm ci`, `npm run build`, and `npm test`. Push checked source to `main`; verify the Git-connected Cloudflare build succeeded for that exact SHA. Check the real domain, `/api/health`, and `/api/items`. `npm run deploy` is manual recovery only and requires a suitable Cloudflare credential.
 
-Android builds are independent of the website. The release APK is signed with the owner’s private key and published as a GitHub Release asset. Preserve the separate signing backup for future updates. No signing secrets are stored in the public repository.
+Android builds are independent of the website. The release APK is signed with the owner’s private key. GitHub Releases link to an immutable APK/checksum commit on the separate `android-releases` branch; source remains on `main`. Direct release-asset uploads are unavailable through the current connection, so the small signed binary is distributed through Git instead. Preserve the separate signing backup for future updates. No signing secrets are stored in the public repository.
