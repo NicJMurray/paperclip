@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "paperclip",
+  "account_id": "22c1482ec05957092be7a2df424c4543",
+  "pages_build_output_dir": "dist",
+  "compatibility_date": "2026-10-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "paperclip",
+    "database_id": "1395d63b-ad48-4243-98fe-c94d94b4f937",
+    "migrations_dir": "server/migrations"
+  }]
+}

@@ -1,0 +1,1 @@
+-keep class com.njmurray.paperclip.UploadWorker { public <init>(android.content.Context, androidx.work.WorkerParameters); }

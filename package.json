@@ -1,0 +1,18 @@
+{
+  "name": "paperclip",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && wrangler pages dev dist",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name paperclip",
+    "db:local": "wrangler d1 migrations apply paperclip --local",
+    "db:remote": "wrangler d1 migrations apply paperclip --remote"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261023.3-beta",
+    "wrangler": "^4.0.0"
+  }
+}

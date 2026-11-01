@@ -1,0 +1,29 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.njmurray.paperclip'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.njmurray.paperclip'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('PAPERCLIP_KEYSTORE')) {
+                storeFile file(System.getenv('PAPERCLIP_KEYSTORE'))
+                storePassword System.getenv('PAPERCLIP_STORE_PASSWORD')
+                keyAlias 'paperclip'
+                keyPassword System.getenv('PAPERCLIP_STORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release { minifyEnabled true; shrinkResources true; signingConfig signingConfigs.release; proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro' }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'androidx.work:work-runtime:2.10.0' }
