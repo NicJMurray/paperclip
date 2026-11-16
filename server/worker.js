@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { assets } from './assets.js';
+import { substackFeedURL, refreshSubstack } from './substack.js';
 
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_REQUEST = MAX_IMAGE + 128 * 1024;
@@ -8,7 +9,7 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'Cache-Control': 'no-store',
 };
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -132,7 +133,35 @@ async function discard(request, env, id) {
   return json({ id, removed: true });
 }
 
-async function collection(request, env) {
+const externalCollection = String.raw`
+  WITH saved AS (
+    SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at,
+      rtrim(substr(raw_url, 1, instr(raw_url || '#', '#') - 1), '/') AS clean_url
+    FROM (
+      SELECT *, substr(url, 1, instr(url || '?', '?') - 1) AS raw_url
+      FROM items WHERE status = 'published'
+    )
+  ),
+  collection AS (
+    SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at,
+      NULL AS source, NULL AS media FROM saved
+    UNION ALL
+    SELECT f.id, f.created_at, 'link', f.url, NULL, f.title, f.summary, f.category,
+      '["substack"]', NULL, f.source, f.media
+    FROM feed_items f
+    WHERE f.source = 'substack' AND NOT EXISTS (
+      SELECT 1 FROM saved s
+      WHERE s.clean_url = f.url
+      OR (f.url GLOB 'https://*.substack.com/p/*' AND
+        s.clean_url = 'https://open.substack.com/pub/' || replace(substr(f.url, 9), '.substack.com/p/', '/p/'))
+      OR (f.source_key GLOB 'note:c-*' AND
+        (s.clean_url GLOB 'https://substack.com/*' OR s.clean_url GLOB 'https://open.substack.com/*') AND
+        substr(s.clean_url, -length(f.source_key) - 1) = '/note/' || substr(f.source_key, 6))
+    )
+  )
+`;
+
+async function collection(request, env, context) {
   const search = new URL(request.url).searchParams;
   const query = (search.get('q') || '').slice(0,200).trim().split(/\s+/).filter(Boolean).slice(0,10);
   const category = (search.get('category') || '').slice(0,64);
@@ -140,12 +169,32 @@ async function collection(request, env) {
   const after = search.get('after') || '';
   if (after && !UUID.test(after.split('|')[1] || '')) throw new HttpError(400, 'Invalid cursor.');
   const [date, id] = after.split('|');
-  const conditions = ["status = 'published'", "(? = '' OR created_at < ? OR (created_at = ? AND id < ?))", "(? = '' OR category = ?)", "(? = '' OR EXISTS (SELECT 1 FROM json_each(items.tags) WHERE value = ?))", ...query.map(()=>"instr(lower(coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(url,'') || ' ' || tags), lower(?)) > 0")];
-  const { results } = await env.DB.prepare(`SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at FROM items WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT 101`).bind(after, date || '', date || '', id || '', category, category, tag, tag, ...query).all();
-  const categories = await env.DB.prepare("SELECT DISTINCT category FROM items WHERE status = 'published' AND category IS NOT NULL ORDER BY category").all();
-  const page = results.slice(0,100);
+  const feed = substackFeedURL(env);
+  const conditions = [
+    "(? = '' OR created_at < ? OR (created_at = ? AND id < ?))",
+    "(? = '' OR category = ?)",
+    "(? = '' OR EXISTS (SELECT 1 FROM json_each(collection.tags) WHERE value = ?))",
+    ...query.map(() => "instr(lower(coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(url,'') || ' ' || tags), lower(?)) > 0"),
+  ];
+  const savedCollection = "WITH collection AS (SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at, NULL AS source, NULL AS media FROM items WHERE status = 'published')";
+  const collectionSQL = feed ? externalCollection : savedCollection;
+  const [pageResult, categories] = await env.DB.batch([
+    env.DB.prepare(collectionSQL + ` SELECT * FROM collection WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT 101`).bind(after, date || '', date || '', id || '', category, category, tag, tag, ...query),
+    env.DB.prepare(collectionSQL + " SELECT DISTINCT category FROM collection WHERE category IS NOT NULL ORDER BY category"),
+  ]);
+  if (feed && !after) {
+    context.waitUntil(refreshSubstack(env, feed).catch(() => console.error(JSON.stringify({ event: 'substack_refresh_failed' }))));
+  }
+  const { results } = pageResult;
+  const page = results.slice(0, 100);
   const last = page.at(-1);
-  return json({ items: page.map(row => ({ ...row, tags: JSON.parse(row.tags), image_url: row.kind === 'image' ? `/media/${row.id}` : null })), categories: categories.results.map(x=>x.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
+  const items = page.map(({ source, media, ...row }) => ({
+    ...row,
+    tags: JSON.parse(row.tags),
+    image_url: row.kind === 'image' ? `/media/${row.id}` : null,
+    ...(source ? { source, media: JSON.parse(media) } : {}),
+  }));
+  return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
 }
 
 async function media(id, env) {
@@ -158,7 +207,7 @@ async function media(id, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, context) {
     try {
       const { pathname } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/pair') return await pair(request, env);
@@ -166,7 +215,7 @@ export default {
       if (request.method === 'GET' && pathname === '/api/queue') return await waiting(request, env);
       if (request.method === 'DELETE' && pathname.startsWith('/api/queue/')) return await discard(request, env, pathname.slice(11));
       if (request.method === 'GET' && pathname === '/api/device') { await authenticate(request, env); return json({ connected: true }); }
-      if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env);
+      if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env, context);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);
       if (request.method === 'GET' && pathname === '/api/health') { await env.DB.prepare('SELECT 1').first(); return json({ ok: true }); }
       if (['GET','HEAD'].includes(request.method) && assets[pathname]) {

@@ -3,9 +3,100 @@ const $ = id => document.getElementById(id);
 const label = value => value.charAt(0).toUpperCase() + value.slice(1);
 const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
 function safeURL(value) { try { const u = new URL(value); return ['https:','http:'].includes(u.protocol) && !u.username && !u.password ? u : null; } catch { return null; } }
+let loadHls;
+function hlsLibrary() {
+  if (loadHls) return loadHls;
+  loadHls = new Promise((resolve, reject) => {
+    const script = element('script');
+    script.src = '/hls.js';
+    script.onload = () => resolve(window.Hls);
+    script.onerror = () => { script.remove(); loadHls = null; reject(new Error('Player unavailable')); };
+    document.head.append(script);
+  });
+  return loadHls;
+}
+
+function sourceLink(url, text, className = '') {
+  const link = element('a', className, text);
+  link.href = url.href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  return link;
+}
+
+function importedMedia(attachment, original, reference) {
+  const url = safeURL(attachment.url);
+  if (!url || url.protocol !== 'https:') return null;
+  const figure = element('figure', 'source-media');
+  if (attachment.type === 'image') {
+    const image = element('img');
+    image.src = url.href;
+    image.alt = attachment.alt || '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    const link = sourceLink(original, '', 'image-link');
+    link.setAttribute('aria-label', attachment.alt || 'View image at source');
+    link.append(image);
+    figure.append(link);
+  } else if (attachment.type === 'video') {
+    const video = element('video', attachment.portrait ? 'portrait' : '');
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'none';
+    if (attachment.poster) video.poster = attachment.poster;
+    video.setAttribute('aria-label', attachment.alt || reference || 'Video');
+    const unavailable = element('p', 'video-error', 'Video unavailable here.');
+    unavailable.hidden = true;
+    function showFallback() {
+      video.hidden = true;
+      unavailable.hidden = false;
+    }
+    video.addEventListener('error', showFallback);
+    if (attachment.format === 'hls' && !video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.controls = false;
+      const play = element('button', 'video-play', 'Play video');
+      play.addEventListener('click', async () => {
+        play.disabled = true;
+        try {
+          const Hls = await hlsLibrary();
+          if (!Hls?.isSupported()) throw new Error('Streaming unavailable');
+          if (!video.isConnected) return;
+          const player = new Hls({ enableWorker: false });
+          video.addEventListener('paperclip-remove', () => player.destroy(), { once: true });
+          player.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) { player.destroy(); showFallback(); }
+          });
+          player.on(Hls.Events.MEDIA_ATTACHED, () => {
+            player.loadSource(url.href);
+            video.play().catch(() => {});
+          });
+          player.attachMedia(video);
+          video.controls = true;
+          play.hidden = true;
+          video.focus();
+        } catch {
+          play.hidden = true;
+          showFallback();
+        }
+      }, { once: true });
+      figure.append(play);
+    } else {
+      video.src = url.href;
+    }
+    figure.append(video, unavailable);
+  } else {
+    return null;
+  }
+  if (attachment.caption) figure.append(element('figcaption', '', attachment.caption));
+  return figure;
+}
+
 function card(item) {
   const url = safeURL(item.url);
   const article = element('article',url ? 'card card--link' : 'card');
+  if (item.source) article.classList.add('card--source');
+  const attachments = item.source && url && Array.isArray(item.media) ? item.media : [];
+  const showMedia = item.category === 'images' || item.category === 'videos';
   let thumbnail = null;
   if (item.kind === 'image') {
     const mediaURL = `/media/${encodeURIComponent(item.id)}`;
@@ -14,19 +105,35 @@ function card(item) {
     const img = element('img'); img.src = mediaURL; img.alt = url ? '' : item.title || 'Saved image'; img.loading = 'lazy'; img.decoding = 'async'; link.append(img);
     if (url) thumbnail = link; else article.append(link);
   }
+  if (!showMedia && attachments.some(media => media.type === 'image')) {
+    const image = attachments.find(media => media.type === 'image');
+    thumbnail = importedMedia({ ...image, caption: '' }, url, item.title)?.firstElementChild;
+  }
   const content = element('div','card-content'), head = element('div','card-heading');
   head.append(element('span','category',item.category || 'other'));
   if (thumbnail) head.append(thumbnail);
   if (url) head.append(element('span','arrow','↗'));
   const h2 = element('h2');
-  if (url) { const a = element('a','',item.title || url.hostname); a.href = url.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; h2.append(a); } else h2.textContent = item.title || 'A small discovery';
-  content.append(head,h2);
+  if (url) h2.append(sourceLink(url, item.title || url.hostname));
+  else h2.textContent = item.title || 'A small discovery';
+  content.append(head);
+  if (!item.source || item.title) content.append(h2);
   if (item.summary) content.append(element('p','',item.summary));
+  if (showMedia) {
+    for (const attachment of attachments.slice(0, 6)) {
+      const figure = importedMedia(attachment, url, item.title);
+      if (figure) content.append(figure);
+    }
+  }
   const tags = element('div','tags');
   for (const tag of (Array.isArray(item.tags) ? item.tags : [])) { const button = element('button','tag',`#${tag}`); button.addEventListener('click',()=>{state.tag=tag;void load(true);}); tags.append(button); }
   content.append(tags);
   const source = element('div','source'); const date = new Date(item.created_at);
-  source.append(element('span','',url ? url.hostname.replace(/^www\./,'') : item.kind === 'image' ? 'A saved image' : 'A saved note'),element('span','',Number.isNaN(+date) ? '' : date.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})));
+  const host = url?.hostname.replace(/^www\./, '');
+  const attribution = item.source && url
+    ? sourceLink(url, host === 'substack.com' ? 'Substack' : 'Substack · ' + host, 'source-link')
+    : element('span', '', host || (item.kind === 'image' ? 'A saved image' : 'A saved note'));
+  source.append(attribution, element('span','',Number.isNaN(+date) ? '' : date.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})));
   content.append(source); article.append(content); return article;
 }
 function render() {
@@ -35,6 +142,7 @@ function render() {
   for (const category of ['all',...categories]) { const b = element('button',state.category === category ? 'active' : '',category === 'all' ? 'Everything' : label(category)); b.setAttribute('aria-pressed',String(state.category === category)); b.addEventListener('click',()=>{state.category=category;void load(true);}); $('categories').append(b); }
   const words = state.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
+  for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
   $('items').replaceChildren(...items.map(card));
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
