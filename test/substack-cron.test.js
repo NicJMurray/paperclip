@@ -22,7 +22,7 @@ const post = {
 };
 const page = (items, nextCursor = null) => Response.json({items, nextCursor});
 
-test('public likes follow Substack cursors and preserve original content and video orientation', async () => {
+test('public likes follow Substack cursors and preserve original content and flag videos for Substack playback', async () => {
   const calls = [];
   const feed = await publicLikes(url => {
     calls.push(url);
@@ -36,9 +36,8 @@ test('public likes follow Substack cursors and preserve original content and vid
   const normalized = await normalizeSubstackFeed(feed);
   assert.deepEqual(normalized.map(i=>i.date), [like,date]);
   assert.equal(normalized[0].summary, note.comment.body);
-  assert.equal(normalized[0].media[0].url, 'https://stream.mux.com/Abc123.m3u8');
-  assert.equal(normalized[0].media[0].poster, 'https://image.mux.com/Abc123/thumbnail.jpg');
-  assert.equal(normalized[0].media[0].portrait, true);
+  assert.equal(normalized[0].category, 'videos');
+  assert.deepEqual(normalized[0].media, []);
   assert.equal(normalized[1].title, post.post.title);
 });
 
