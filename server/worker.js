@@ -192,15 +192,19 @@ async function collection(request, env, context) {
     ...row,
     tags: JSON.parse(row.tags),
     image_url: row.kind === 'image' ? `/media/${row.id}` : null,
-    ...(source ? { source, media: JSON.parse(media) }
-      : sharedSubstackLink(row.url) ? { embed_url: `/embed/substack/${row.id}` } : {}),
+    ...(source ? { source, media: JSON.parse(media) } : {}),
+    ...((!source || row.category === 'videos') && sharedSubstackLink(row.url)
+      ? { embed_url: `/embed/substack/${row.id}` } : {}),
   }));
   return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
 }
 
 async function substackEmbed(id, env) {
   if (!UUID.test(id)) throw new HttpError(404, 'Not found.');
-  const item = await env.DB.prepare("SELECT url FROM items WHERE id = ? AND status = 'published'").bind(id).first();
+  let item = await env.DB.prepare("SELECT url FROM items WHERE id = ? AND status = 'published'").bind(id).first();
+  if (!item && (env.SUBSTACK_CRON_FEED === '1' || substackFeedURL(env))) {
+    item = await env.DB.prepare("SELECT url FROM feed_items WHERE id = ? AND source = 'substack' AND category = 'videos'").bind(id).first();
+  }
   const link = sharedSubstackLink(item?.url);
   if (!link) throw new HttpError(404, 'Not found.');
 
