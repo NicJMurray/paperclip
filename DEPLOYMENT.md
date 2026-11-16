@@ -53,3 +53,34 @@ To unpublish immediately, set the item’s status to `held`; the API and media r
 Run `npm ci`, `npm run build`, and `npm test`. Push checked source to `main`; verify the Git-connected Cloudflare build succeeded for that exact SHA. Check the real domain, `/api/health`, and `/api/items`. `npm run deploy` is manual recovery only and requires a suitable Cloudflare credential.
 
 Android builds are independent of the website. The release APK is signed with the owner’s private key. GitHub Releases link to an immutable APK/checksum commit on the separate `android-releases` branch; source remains on `main`. Direct release-asset uploads are unavailable through the current connection, so the small signed binary is distributed through Git instead. Preserve the separate signing backup for future updates. No signing secrets are stored in the public repository.
+
+## Substack likes
+
+Apply `0003_external_feed.sql` before enabling the feed. Paperclip needs an authorized HTTPS endpoint for your public likes. Set `SUBSTACK_LIKES_URL` in the production Pages environment. If the endpoint requires bearer authentication, add `SUBSTACK_LIKES_TOKEN` as a secret. Redeploy after changing the production environment. Keep credentials out of the URL, the repository and the Cloudflare build logs.
+
+The endpoint must return JSON with this shape.
+
+```json
+{
+  "profile": "https://substack.com/@nicjm",
+  "complete": true,
+  "items": [
+    {
+      "public": true,
+      "type": "post",
+      "url": "https://example.substack.com/p/example",
+      "published_at": "2026-11-01T12:00:00Z",
+      "liked_at": "2026-11-16T18:30:00Z",
+      "title": "Original title",
+      "summary": "Original description",
+      "media": []
+    }
+  ]
+}
+```
+
+Use `note` or `post` for `type`. A Note can carry its original text as `summary` with the title omitted. Use UTC ISO timestamps or include a numeric offset. `liked_at` takes priority when supplied. Media entries take a `type` of `image` or `video`, an HTTPS `url` and optional source-provided `alt`, `caption`, `poster` (video), `width` and `height`. Supply only media the creator or provider permits to play externally. Paperclip accepts Substack-hosted images and Substack or Mux MP4/HLS URLs. Use `video: true` to categorize a video whose source only provides a link. The public response and normalized snapshot are each capped at 1 MiB.
+
+Return the complete snapshot of eligible likes on each successful refresh, including any historical pages. A complete empty snapshot clears the imported likes. An optional `ETag` lets the endpoint return 304 when unchanged. Avoid reporting a partial or failed upstream fetch as a complete snapshot. Keep restricted content out of the public snapshot.
+
+Paperclip refreshes in the background on the first feed request after the hourly interval. The next request sees the latest successful snapshot. For hourly refresh even when the site has no visitors, point an hourly scheduler at `https://paperclip.njmurray.com/api/items`. On a fetch or validation failure, the last successful snapshot remains available. A valid new snapshot removes unliked items. Remove `SUBSTACK_LIKES_URL` and redeploy to hide the imported feed immediately. Existing saved items and the Android inbox continue to use their current workflow.
