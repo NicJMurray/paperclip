@@ -56,6 +56,13 @@ Android builds are independent of the website. The release APK is signed with th
 
 ## Substack likes
 
+The `paperclip-substack-likes` Worker reads the signed-out `@nicjm` profile and the public likes data used by Substack's web app. It has no public routes. Its Cron Trigger runs Mondays and Thursdays at 07:17 UTC and writes a complete snapshot into the same D1 database. It uses no Substack login or cookies. If the profile stops showing likes in public it clears the import; an HTTP, parsing or pagination failure preserves the last complete snapshot. Only publicly visible Notes and published posts with an everyone audience are imported. The Worker follows at most 20 pages per refresh and preserves the publication's wording and source links.
+
+The production Pages project reads that snapshot when `SUBSTACK_CRON_FEED` is `1`. To pause refresh, remove the Worker Cron Trigger. To hide imported items, also remove the flag from `wrangler.jsonc` and redeploy Pages. The custom Worker configuration is `wrangler.substack.jsonc` and can be deployed with `npx wrangler deploy --config wrangler.substack.jsonc`. Apply `0003_external_feed.sql` before enabling the Worker on a fresh database. The Cloudflare Worker logs and D1 table `feed_sync` show recent attempts. The source is an undocumented web route and may change.
+
+### Optional external feed
+
+
 Apply `0003_external_feed.sql` before enabling the feed. Paperclip needs an authorized HTTPS endpoint for your public likes. Set `SUBSTACK_LIKES_URL` in the production Pages environment. If the endpoint requires bearer authentication, add `SUBSTACK_LIKES_TOKEN` as a secret. Redeploy after changing the production environment. Keep credentials out of the URL, the repository and the Cloudflare build logs.
 
 The endpoint must return JSON with this shape.

@@ -9,7 +9,7 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self'; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://image.mux.com https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self'; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'Cache-Control': 'no-store',
 };
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -177,7 +177,7 @@ async function collection(request, env, context) {
     ...query.map(() => "instr(lower(coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(url,'') || ' ' || tags), lower(?)) > 0"),
   ];
   const savedCollection = "WITH collection AS (SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at, NULL AS source, NULL AS media FROM items WHERE status = 'published')";
-  const collectionSQL = feed ? externalCollection : savedCollection;
+  const collectionSQL = (feed || env.SUBSTACK_CRON_FEED === '1') ? externalCollection : savedCollection;
   const [pageResult, categories] = await env.DB.batch([
     env.DB.prepare(collectionSQL + ` SELECT * FROM collection WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT 101`).bind(after, date || '', date || '', id || '', category, category, tag, tag, ...query),
     env.DB.prepare(collectionSQL + " SELECT DISTINCT category FROM collection WHERE category IS NOT NULL ORDER BY category"),
