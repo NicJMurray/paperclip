@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { assets } from './assets.js';
-import { substackFeedURL, refreshSubstack } from './substack.js';
+import { substackFeedURL, refreshSubstack, sharedSubstackLink } from './substack.js';
 
 const MAX_IMAGE = 10 * 1024 * 1024;
 const MAX_REQUEST = MAX_IMAGE + 128 * 1024;
@@ -9,7 +9,7 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self'; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'Cache-Control': 'no-store',
 };
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -192,9 +192,57 @@ async function collection(request, env, context) {
     ...row,
     tags: JSON.parse(row.tags),
     image_url: row.kind === 'image' ? `/media/${row.id}` : null,
-    ...(source ? { source, media: JSON.parse(media) } : {}),
+    ...(source ? { source, media: JSON.parse(media) }
+      : sharedSubstackLink(row.url) ? { embed_url: `/embed/substack/${row.id}` } : {}),
   }));
   return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
+}
+
+async function substackEmbed(id, env) {
+  if (!UUID.test(id)) throw new HttpError(404, 'Not found.');
+  const item = await env.DB.prepare("SELECT url FROM items WHERE id = ? AND status = 'published'").bind(id).first();
+  const link = sharedSubstackLink(item?.url);
+  if (!link) throw new HttpError(404, 'Not found.');
+
+  const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
+  const sandbox = 'allow-scripts allow-popups allow-popups-to-escape-sandbox';
+  const policy = [
+    "default-src 'none'",
+    "script-src 'nonce-" + nonce + "' https://substack.com/embedjs/embed.js",
+    "style-src 'unsafe-inline'",
+    "img-src https://substack.com https://*.substack.com https://substackcdn.com",
+    "media-src https://substackcdn.com https://*.mux.com",
+    "frame-src https://substack.com https://*.substack.com",
+    "connect-src https://substack.com https://*.substack.com",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'self'",
+    "sandbox " + sandbox,
+  ].join('; ');
+  const href = link.url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+  const body = `<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Substack preview</title>
+<style>body{margin:0;font:13px system-ui,sans-serif}a{color:#3b6651}iframe{max-width:100%}</style>
+<div id="preview"><div class="substack-post-embed">
+  <a ${link.attribute} href="${href}" target="_blank" rel="noopener noreferrer">Open on Substack</a>
+</div></div>
+<script nonce="${nonce}">
+const preview = document.getElementById('preview');
+new ResizeObserver(() => {
+  parent.postMessage({ type: 'paperclip:embed-height', height: preview.offsetHeight }, '*');
+}).observe(preview);
+</script>
+<script async src="https://substack.com/embedjs/embed.js"></script>
+</html>`;
+  return new Response(body, { headers: {
+    ...HEADERS,
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Security-Policy': policy,
+    'X-Frame-Options': 'SAMEORIGIN',
+  } });
 }
 
 async function media(id, env) {
@@ -216,6 +264,7 @@ export default {
       if (request.method === 'DELETE' && pathname.startsWith('/api/queue/')) return await discard(request, env, pathname.slice(11));
       if (request.method === 'GET' && pathname === '/api/device') { await authenticate(request, env); return json({ connected: true }); }
       if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env, context);
+      if (request.method === 'GET' && pathname.startsWith('/embed/substack/')) return await substackEmbed(pathname.slice('/embed/substack/'.length), env);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);
       if (request.method === 'GET' && pathname === '/api/health') { await env.DB.prepare('SELECT 1').first(); return json({ ok: true }); }
       if (['GET','HEAD'].includes(request.method) && assets[pathname]) {

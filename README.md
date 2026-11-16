@@ -14,6 +14,8 @@ The app shows the three most recent waiting items, combining uploads on this pho
 
 Website updates appear automatically. For Android updates, install the newer APK over the existing app using the same signing key. Your connection and outbox remain in place; do not uninstall first. Version 1.1 adds the queue list and removal controls.
 
+For public Substack posts and Notes, use Substack's **Share → Paperclip**. If Substack only offers **Copy link**, share that link from your browser. After curation publishes the item, select **Preview on Paperclip** to open Substack's official embed. The source link is available on the card. This works for recognized Substack URLs, including links copied from your Likes tab.
+
 Android controls the share-sheet order. Long-press Paperclip and choose **Pin** if your phone supports it. The app cannot force itself into the first position or add a Share action to another app that does not offer one.
 
 ## What it saves

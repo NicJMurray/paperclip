@@ -102,3 +102,40 @@ test('Substack refresh is idempotent and mixes with saved cards without exposing
   results = await read();
   assert.deepEqual(results.items.map(item => item.id), [savedID]);
 });
+
+test('shared Substack URLs expose official previews only after curation publishes them', async () => {
+  const noteId = randomUUID(), postId = randomUUID(), pendingId = randomUUID(), heldId = randomUUID(), otherId = randomUUID();
+  const capture = (id, url, status) => db.prepare("INSERT INTO items(id,kind,status,url) VALUES (?,'link',?,?)").bind(id, status, url);
+  await db.batch([
+    capture(noteId, noteURL + '?utm_source=share', 'published'),
+    capture(postId, 'https://open.substack.com/pub/author/p/article?r=privacy#comments', 'published'),
+    capture(pendingId, noteURL, 'pending'),
+    capture(heldId, noteURL, 'held'),
+    capture(otherId, 'https://notsubstack.com/p/article', 'published'),
+  ]);
+  const call = path => mf.dispatchFetch('https://paperclip.test' + path);
+  const path = id => '/embed/substack/' + id;
+  const list = await (await call('/api/items')).json();
+  const urls = Object.fromEntries(list.items.map(item => [item.id, item.embed_url]));
+  assert.equal(urls[noteId], path(noteId));
+  assert.equal(urls[postId], path(postId));
+  assert.equal(urls[otherId], undefined);
+  assert.ok(!list.items.some(item => [pendingId, heldId].includes(item.id)));
+
+  for (const [id, label, url] of [[noteId, 'data-comment-link', noteURL], [postId, 'data-post-link', postURL]]) {
+    const response = await call(path(id));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('X-Frame-Options'), 'SAMEORIGIN');
+    const csp = response.headers.get('Content-Security-Policy');
+    assert.match(csp, /frame-ancestors 'self'/);
+    assert.match(csp, /sandbox allow-scripts/);
+    assert.doesNotMatch(csp, /allow-same-origin/);
+    const html = await response.text();
+    assert.ok(html.includes(label + ' href="' + url + '"'));
+    assert.ok(html.includes('https://substack.com/embedjs/embed.js'));
+    assert.doesNotMatch(html, /utm_source=|r=privacy/);
+  }
+  for (const id of [pendingId, heldId, otherId, 'bad-id']) {
+    assert.equal((await call(path(id))).status, 404);
+  }
+});

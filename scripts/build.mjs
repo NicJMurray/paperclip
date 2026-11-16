@@ -8,7 +8,7 @@ const hls = await readFile(new URL('../node_modules/hls.js/dist/hls.light.min.js
 const assets = { '/hls.js': [hls, 'text/javascript; charset=utf-8'], '/': [html, 'text/html; charset=utf-8'], '/style.css': [css, 'text/css; charset=utf-8'], '/app.js': [js, 'text/javascript; charset=utf-8'] };
 await mkdir(new URL('../dist/', import.meta.url), { recursive: true });
 await writeFile(new URL('../dist/_worker.js', import.meta.url), worker.replace("import { assets } from './assets.js';", `const assets = ${JSON.stringify(assets)};`)
-  .replace("import { substackFeedURL, refreshSubstack } from './substack.js';", () => substack.replace(/^export /gm, '')));
+  .replace("import { substackFeedURL, refreshSubstack, sharedSubstackLink } from './substack.js';", () => substack.replace(/^export /gm, '')));
 await writeFile(new URL('../dist/index.html', import.meta.url), html);
 await writeFile(new URL('../dist/_routes.json', import.meta.url), JSON.stringify({ version: 1, include: ['/*'], exclude: [] }));
 console.log('Built Paperclip Worker and web assets.');

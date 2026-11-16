@@ -91,6 +91,40 @@ function importedMedia(attachment, original, reference) {
   return figure;
 }
 
+const substackFrames = new WeakMap();
+window.addEventListener('message', event => {
+  if (event.origin !== 'null' || !event.source || event.data?.type !== 'paperclip:embed-height') return;
+  const frame = substackFrames.get(event.source);
+  const height = event.data.height;
+  if (frame && Number.isFinite(height)) frame.height = Math.min(800, Math.max(56, Math.ceil(height) + 4));
+});
+
+function substackPreview(path) {
+  const preview = element('details', 'substack-preview');
+  preview.append(element('summary', '', 'Preview on Paperclip'));
+  let frame;
+  preview.addEventListener('toggle', () => {
+    if (!preview.open) {
+      if (frame) {
+        substackFrames.delete(frame.contentWindow);
+        frame.remove();
+        frame = null;
+      }
+      return;
+    }
+    if (frame) return;
+    frame = element('iframe');
+    frame.title = 'Substack preview';
+    frame.height = 200;
+    frame.allow = 'fullscreen; picture-in-picture';
+    frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    frame.src = path;
+    preview.append(frame);
+    substackFrames.set(frame.contentWindow, frame);
+  });
+  return preview;
+}
+
 function card(item) {
   const url = safeURL(item.url);
   const article = element('article',url ? 'card card--link' : 'card');
@@ -125,6 +159,7 @@ function card(item) {
       if (figure) content.append(figure);
     }
   }
+  if (item.embed_url) content.append(substackPreview(item.embed_url));
   const tags = element('div','tags');
   for (const tag of (Array.isArray(item.tags) ? item.tags : [])) { const button = element('button','tag',`#${tag}`); button.addEventListener('click',()=>{state.tag=tag;void load(true);}); tags.append(button); }
   content.append(tags);
