@@ -130,7 +130,7 @@ export async function refreshSubstack(env, url, fetchFeed = fetch, now = Date.no
   const headers = new Headers({ Accept: 'application/json' });
   if (env.SUBSTACK_LIKES_TOKEN) headers.set('Authorization', 'Bearer ' + env.SUBSTACK_LIKES_TOKEN);
   if (lease.etag && lease.url === url.href) headers.set('If-None-Match', lease.etag);
-  const response = await fetchFeed(url, { headers, redirect: 'error', signal: AbortSignal.timeout(10000) });
+  const response = await fetchFeed(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(10000) });
   if (response.status === 304 && headers.has('If-None-Match')) return;
   if (!response.ok || !response.headers.get('Content-Type')?.toLowerCase().includes('application/json')) {
     throw new Error('Substack snapshot unavailable');

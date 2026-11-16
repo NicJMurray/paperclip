@@ -6,7 +6,7 @@ LIKES_URL.searchParams.set('types[]', 'like');
 const MAX_PAGES = 20;
 
 async function publicResponse(fetchPage, url, accept, signal) {
-  const response = await fetchPage(url, { headers: { Accept: accept }, redirect: 'error', signal });
+  const response = await fetchPage(url, { headers: { Accept: accept }, redirect: 'manual', signal });
   if (!response.ok || !response.headers.get('content-type')?.includes(accept)) {
     throw new Error('Unexpected Substack response (' + response.status + ')');
   }

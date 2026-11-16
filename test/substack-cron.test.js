@@ -50,4 +50,8 @@ test('the public likes reader honors profile visibility and rejects incomplete l
   const reply = url => new URL(url).href === first.href ? profile(true) : page([note], 'same-cursor');
   await assert.rejects(publicLikes(reply), /cursor repeated/);
   await assert.rejects(publicLikes(() => new Response('', {status:429})), /429/);
+  await assert.rejects(publicLikes((_url, request) => {
+    assert.equal(request.redirect, 'manual');
+    return new Response(null, {status:302, headers:{location:'https://substack.com/sign-in'}});
+  }), /302/);
 });
