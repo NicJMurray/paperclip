@@ -122,17 +122,22 @@ test('shared Substack URLs expose official previews only after curation publishe
   assert.equal(urls[otherId], undefined);
   assert.ok(!list.items.some(item => [pendingId, heldId].includes(item.id)));
 
-  for (const [id, label, url] of [[noteId, 'data-comment-link', noteURL], [postId, 'data-post-link', postURL]]) {
+  for (const [id, embed, url] of [
+    [noteId, 'https://substack.com/embed/c/1234', noteURL],
+    [postId, 'https://author.substack.com/embed/p/article', postURL],
+  ]) {
     const response = await call(path(id));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('X-Frame-Options'), 'SAMEORIGIN');
     const csp = response.headers.get('Content-Security-Policy');
     assert.match(csp, /frame-ancestors 'self'/);
-    assert.match(csp, /sandbox allow-scripts/);
-    assert.doesNotMatch(csp, /allow-same-origin/);
+    assert.ok(csp.includes('frame-src ' + new URL(embed).origin));
+    assert.doesNotMatch(csp, /sandbox/);
     const html = await response.text();
-    assert.ok(html.includes(label + ' href="' + url + '"'));
-    assert.ok(html.includes('https://substack.com/embedjs/embed.js'));
+    assert.ok(html.includes('href="' + url + '"'));
+    assert.ok(html.includes('src="' + embed + '?origin=https%3A%2F%2Fpaperclip.test&amp;fullURL='));
+    assert.match(html, /allowfullscreen/);
+    assert.doesNotMatch(html, /embedjs\/embed\.js/);
     assert.doesNotMatch(html, /utm_source=|r=privacy/);
   }
   for (const id of [pendingId, heldId, otherId, 'bad-id']) {
@@ -149,5 +154,5 @@ test('synced Substack videos also offer the official preview as a fallback', asy
   assert.equal(feed.items.find(item => item.id === id).embed_url, '/embed/substack/' + id);
   const preview = await call('/embed/substack/' + id);
   assert.equal(preview.status, 200);
-  assert.match(await preview.text(), /https:\/\/substack\.com\/@author\/note\/c-9001/);
+  assert.match(await preview.text(), /https:\/\/substack\.com\/embed\/c\/9001/);
 });

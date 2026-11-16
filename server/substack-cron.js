@@ -32,19 +32,6 @@ async function responseText(response, limit) {
   }
 }
 
-function videoMedia(upload) {
-  if (upload?.state !== 'transcoded' || upload.media_type !== 'video' ||
-      upload.copyright_infringement || !/^[a-zA-Z0-9]+$/.test(upload.mux_playback_id ?? '')) return [];
-  const id = upload.mux_playback_id;
-  return [{
-    type: 'video',
-    url: 'https://stream.mux.com/' + id + '.m3u8',
-    poster: 'https://image.mux.com/' + id + '/thumbnail.jpg',
-    width: upload.width,
-    height: upload.height,
-  }];
-}
-
 function likedItem(item) {
   if (item.context?.type === 'note_like' && item.type === 'comment') {
     const note = item.comment;
@@ -54,7 +41,7 @@ function likedItem(item) {
       if (attachment.type === 'image') {
         return [{type: 'image', url: attachment.imageUrl, width: attachment.imageWidth, height: attachment.imageHeight}];
       }
-      return attachment.type === 'video' ? videoMedia(attachment.mediaUpload) : [];
+      return [];
     });
     return {
       public: true,
@@ -79,7 +66,7 @@ function likedItem(item) {
     published_at: post.post_date,
     title: post.title,
     summary: post.subtitle ?? post.description,
-    media: [...videoMedia(post.videoUpload), ...(post.cover_image && !post.videoUpload ? [{type: 'image', url: post.cover_image}] : [])],
+    media: post.cover_image ? [{type: 'image', url: post.cover_image}] : [],
     video: post.type === 'video' || Boolean(post.video_upload_id),
   };
 }

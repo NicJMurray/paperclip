@@ -199,7 +199,7 @@ async function collection(request, env, context) {
   return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
 }
 
-async function substackEmbed(id, env) {
+async function substackEmbed(request, id, env) {
   if (!UUID.test(id)) throw new HttpError(404, 'Not found.');
   let item = await env.DB.prepare("SELECT url FROM items WHERE id = ? AND status = 'published'").bind(id).first();
   if (!item && (env.SUBSTACK_CRON_FEED === '1' || substackFeedURL(env))) {
@@ -208,38 +208,51 @@ async function substackEmbed(id, env) {
   const link = sharedSubstackLink(item?.url);
   if (!link) throw new HttpError(404, 'Not found.');
 
+  const source = new URL(link.url);
+  const origin = new URL(request.url).origin;
+  const destination = link.attribute === 'data-comment-link'
+    ? new URL('/embed/c/' + source.pathname.split('/').at(-1).slice(2), 'https://substack.com')
+    : new URL('/embed' + source.pathname, source.origin);
+  destination.searchParams.set('origin', origin);
+  destination.searchParams.set('fullURL', origin + '/');
+
   const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
-  const sandbox = 'allow-scripts allow-popups allow-popups-to-escape-sandbox';
   const policy = [
     "default-src 'none'",
-    "script-src 'nonce-" + nonce + "' https://substack.com/embedjs/embed.js",
+    "script-src 'nonce-" + nonce + "'",
     "style-src 'unsafe-inline'",
-    "img-src https://substack.com https://*.substack.com https://substackcdn.com",
-    "media-src https://substackcdn.com https://*.mux.com",
-    "frame-src https://substack.com https://*.substack.com",
-    "connect-src https://substack.com https://*.substack.com",
+    "frame-src " + destination.origin,
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'self'",
-    "sandbox " + sandbox,
   ].join('; ');
-  const href = link.url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+  const escapeAttribute = url => url.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
   const body = `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Substack preview</title>
-<style>body{margin:0;font:13px system-ui,sans-serif}a{color:#3b6651}iframe{max-width:100%}</style>
-<div id="preview"><div class="substack-post-embed">
-  <a ${link.attribute} href="${href}" target="_blank" rel="noopener noreferrer">Open on Substack</a>
-</div></div>
+<style>body{margin:0;font:13px system-ui,sans-serif}a{color:#3b6651}iframe{display:block;width:100%;border:0}</style>
+<div id="preview">
+  <iframe id="player" title="Substack player" src="${escapeAttribute(destination.href)}" height="440"
+    allow="fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>
+  <a href="${escapeAttribute(source.href)}" target="_blank" rel="noopener noreferrer">Open on Substack</a>
+</div>
 <script nonce="${nonce}">
 const preview = document.getElementById('preview');
+const player = document.getElementById('player');
+const playerOrigin = new URL(player.src).origin;
+window.addEventListener('message', event => {
+  if (event.origin !== playerOrigin || event.source !== player.contentWindow) return;
+  const height = Number(event.data?.iframeHeight);
+  if (Number.isFinite(height) && height > 0) player.height = Math.min(1100, Math.ceil(height));
+});
 new ResizeObserver(() => {
-  parent.postMessage({ type: 'paperclip:embed-height', height: preview.offsetHeight }, '*');
+  if (parent !== window) {
+    parent.postMessage({ type: 'paperclip:embed-height', height: preview.offsetHeight }, location.origin);
+  }
 }).observe(preview);
 </script>
-<script async src="https://substack.com/embedjs/embed.js"></script>
 </html>`;
   return new Response(body, { headers: {
     ...HEADERS,
@@ -268,7 +281,7 @@ export default {
       if (request.method === 'DELETE' && pathname.startsWith('/api/queue/')) return await discard(request, env, pathname.slice(11));
       if (request.method === 'GET' && pathname === '/api/device') { await authenticate(request, env); return json({ connected: true }); }
       if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env, context);
-      if (request.method === 'GET' && pathname.startsWith('/embed/substack/')) return await substackEmbed(pathname.slice('/embed/substack/'.length), env);
+      if (request.method === 'GET' && pathname.startsWith('/embed/substack/')) return await substackEmbed(request, pathname.slice('/embed/substack/'.length), env);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);
       if (request.method === 'GET' && pathname === '/api/health') { await env.DB.prepare('SELECT 1').first(); return json({ ok: true }); }
       if (['GET','HEAD'].includes(request.method) && assets[pathname]) {
