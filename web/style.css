@@ -16,3 +16,8 @@
 .card--link .source-media .image-link img{width:100%;height:auto}
 .source-media figcaption,.source-media .video-error{font-size:11px;color:var(--muted);margin:6px 0 0;white-space:pre-line;overflow-wrap:anywhere}
 .video-play{background:#eef0e7;color:var(--green);border:1px solid var(--line);border-radius:4px;padding:8px 12px;margin-bottom:8px}
+
+.substack-preview{position:relative;z-index:1;margin:0 0 15px}
+.substack-preview summary{width:fit-content;color:var(--green);cursor:pointer;font-size:13px;padding:7px 0}
+.substack-preview summary:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.substack-preview iframe{display:block;width:100%;border:0;margin-top:6px}

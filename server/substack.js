@@ -39,6 +39,16 @@ function originalLink(value, type) {
   return { url: url.href, key: url.href };
 }
 
+export function sharedSubstackLink(value) {
+  const url = secureURL(value);
+  if (!url || (url.hostname !== 'substack.com' && !url.hostname.endsWith('.substack.com'))) return null;
+  const note = originalLink(value, 'note');
+  if (note) return { url: note.url, attribute: 'data-comment-link' };
+  const post = originalLink(value, 'post');
+  if (!post || url.hostname === 'open.substack.com' && !url.pathname.startsWith('/pub/')) return null;
+  return { url: post.url, attribute: 'data-post-link' };
+}
+
 const IMAGE_HOSTS = ['substackcdn.com', 'substack-post-media.s3.amazonaws.com', 'substack-video.s3.amazonaws.com'];
 const VIDEO_HOSTS = ['substackcdn.com', 'substack-video.s3.amazonaws.com', 'stream.mux.com'];
 
