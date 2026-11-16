@@ -1,3 +1,5 @@
+import { createVideoFeed } from './video-feed.js';
+
 const state = { items: [], categories: [], category: 'all', tag: '', query: '', cursor: null, busy: false, failed: false, serial: 0 };
 const $ = id => document.getElementById(id);
 const label = value => value.charAt(0).toUpperCase() + value.slice(1);
@@ -91,6 +93,9 @@ function importedMedia(attachment, original, reference) {
   return figure;
 }
 
+const scrollingVideos = createVideoFeed(window);
+new ResizeObserver(scrollingVideos.update).observe($('items'));
+
 const substackFrames = new WeakMap();
 window.addEventListener('message', event => {
   const player = substackFrames.get(event.source);
@@ -131,6 +136,51 @@ function substackVideoCard(item, original) {
   return card;
 }
 
+function registerSubstackFrames(container) {
+  for (const frame of container.querySelectorAll('.substack-video-card iframe')) {
+    substackFrames.set(frame.contentWindow, {
+      frame,
+      origin: new URL(frame.src).origin,
+      fallback: frame.nextElementSibling,
+    });
+  }
+}
+
+function directVideoCard(item, original, media) {
+  const card = element('article', 'card paperclip-video-card');
+  const heading = element('div', 'video-heading');
+  const title = item.title || item.summary?.split(/\n\s*\n/)[0]?.trim();
+  if (title) {
+    const h2 = element('h2');
+    h2.append(sourceLink(original, title));
+    heading.append(h2);
+  }
+  const sound = element('button', 'video-sound', '🔇');
+  sound.type = 'button';
+  heading.append(sound);
+
+  const video = element('video', media.portrait ? 'portrait' : '');
+  video.controls = true;
+  video.playsInline = true;
+  video.defaultMuted = true;
+  video.muted = true;
+  video.preload = 'none';
+  video.setAttribute('aria-label', title || 'Substack video');
+  if (media.poster) video.poster = media.poster;
+  video.src = media.url;
+
+  video.addEventListener('error', () => {
+    if (!card.isConnected) return;
+    scrollingVideos.forget(video);
+    const fallback = substackVideoCard(item, original);
+    card.replaceWith(fallback);
+    registerSubstackFrames($('items'));
+  }, {once: true});
+  card.append(heading, video);
+  scrollingVideos.track(video, sound);
+  return card;
+}
+
 function substackPreview(path) {
   const preview = element('details', 'substack-preview');
   preview.append(element('summary', '', 'Preview on Paperclip'));
@@ -155,7 +205,10 @@ function substackPreview(path) {
 
 function card(item) {
   const url = safeURL(item.url);
-  if (item.player_url && url) return substackVideoCard(item, url);
+  if (item.player_url && url) {
+    const media = item.media?.find(attachment => attachment.type === 'video' && attachment.format !== 'hls');
+    return media ? directVideoCard(item, url, media) : substackVideoCard(item, url);
+  }
   const article = element('article',url ? 'card card--link' : 'card');
   if (item.source) article.classList.add('card--source');
   const attachments = item.source && url && Array.isArray(item.media) ? item.media : [];
@@ -207,14 +260,9 @@ function render() {
   const words = state.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
   for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
+  scrollingVideos.clear();
   $('items').replaceChildren(...items.map(card));
-  for (const frame of $('items').querySelectorAll('.substack-video-card iframe')) {
-    substackFrames.set(frame.contentWindow, {
-      frame,
-      origin: new URL(frame.src).origin,
-      fallback: frame.nextElementSibling,
-    });
-  }
+  registerSubstackFrames($('items'));
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;

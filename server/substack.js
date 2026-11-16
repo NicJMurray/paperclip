@@ -51,6 +51,12 @@ export function sharedSubstackLink(value) {
 
 const IMAGE_HOSTS = ['substackcdn.com', 'substack-post-media.s3.amazonaws.com', 'substack-video.s3.amazonaws.com', 'image.mux.com'];
 const VIDEO_HOSTS = ['substackcdn.com', 'substack-video.s3.amazonaws.com', 'stream.mux.com'];
+const VIDEO_UPLOAD_PATH = /^\/api\/v1\/video\/upload\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/src$/i;
+
+function firstPartyVideo(url) {
+  return (url.hostname === 'substack.com' || url.hostname.endsWith('.substack.com')) &&
+    VIDEO_UPLOAD_PATH.test(url.pathname) && url.search === '?type=mp4' && !url.hash;
+}
 
 function originalImage(value) {
   const url = secureURL(value);
@@ -66,7 +72,7 @@ function originalMedia(value) {
     if (!url || seen.has(url.href)) continue;
     const imageHost = IMAGE_HOSTS.includes(url.hostname);
     const videoHost = VIDEO_HOSTS.includes(url.hostname);
-    const mp4 = item.type === 'video' && videoHost && /\.mp4$/i.test(url.pathname);
+    const mp4 = item.type === 'video' && (firstPartyVideo(url) || (videoHost && /\.mp4$/i.test(url.pathname)));
     const hls = item.type === 'video' && videoHost && /\.m3u8$/i.test(url.pathname);
     if (!(item.type === 'image' && imageHost) && !mp4 && !hls) continue;
     seen.add(url.href);

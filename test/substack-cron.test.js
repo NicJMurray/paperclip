@@ -13,7 +13,7 @@ const profile = hasLikes => new Response(
 const note = {
   type:'comment', context:{type:'note_like', timestamp:like},
   comment:{type:'feed', post_id:null, id:456, handle:'creator', body:'The original Note.', date,
-    attachments:[{type:'video', mediaUpload:{state:'transcoded', media_type:'video', mux_playback_id:'Abc123', width:1080,height:1920}}]},
+    attachments:[{type:'video', mediaUpload:{id:'9f39f7eb-d650-4e58-b7ad-c22d44b87d55', state:'transcoded', media_type:'video', width:1080,height:1920}}]},
 };
 const post = {
   type:'post', context:{type:'post_like'},
@@ -22,7 +22,7 @@ const post = {
 };
 const page = (items, nextCursor = null) => Response.json({items, nextCursor});
 
-test('public likes follow Substack cursors and preserve original content and flag videos for Substack playback', async () => {
+test('public likes follow Substack cursors and preserve original media', async () => {
   const calls = [];
   const feed = await publicLikes(url => {
     calls.push(url);
@@ -37,7 +37,9 @@ test('public likes follow Substack cursors and preserve original content and fla
   assert.deepEqual(normalized.map(i=>i.date), [like,date]);
   assert.equal(normalized[0].summary, note.comment.body);
   assert.equal(normalized[0].category, 'videos');
-  assert.deepEqual(normalized[0].media, []);
+  assert.equal(normalized[0].media[0].url, 'https://substack.com/api/v1/video/upload/9f39f7eb-d650-4e58-b7ad-c22d44b87d55/src?type=mp4');
+  assert.equal(normalized[0].media[0].portrait, true);
+  assert.equal(normalized[0].media[0].format, null);
   assert.equal(normalized[1].title, post.post.title);
 });
 
