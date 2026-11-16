@@ -139,3 +139,15 @@ test('shared Substack URLs expose official previews only after curation publishe
     assert.equal((await call(path(id))).status, 404);
   }
 });
+
+test('synced Substack videos also offer the official preview as a fallback', async () => {
+  const id = randomUUID();
+  await db.prepare("INSERT INTO feed_items(id,source,url,created_at,category,media,source_key) VALUES (?,'substack',?,?,'videos','[]','note:c-9001')")
+    .bind(id, 'https://substack.com/@author/note/c-9001', liked).run();
+  const call = path => mf.dispatchFetch('https://paperclip.test' + path);
+  const feed = await (await call('/api/items?tag=substack&category=videos')).json();
+  assert.equal(feed.items.find(item => item.id === id).embed_url, '/embed/substack/' + id);
+  const preview = await call('/embed/substack/' + id);
+  assert.equal(preview.status, 200);
+  assert.match(await preview.text(), /https:\/\/substack\.com\/@author\/note\/c-9001/);
+});
