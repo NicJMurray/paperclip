@@ -1,12 +1,13 @@
 import { SUBSTACK_PROFILE, refreshSubstack } from './substack.js';
 
 const PROFILE_ID = 361029705;
+const PROFILE_LIKES_PAGE = SUBSTACK_PROFILE + '?tab=likes';
 const LIKES_URL = new URL('/api/v1/reader/feed/profile/' + PROFILE_ID, SUBSTACK_PROFILE);
 LIKES_URL.searchParams.set('types[]', 'like');
 const MAX_PAGES = 20;
 
 async function publicResponse(fetchPage, url, accept, signal) {
-  const response = await fetchPage(url, { headers: { Accept: accept }, redirect: 'manual', signal });
+  const response = await fetchPage(url, { headers: { Accept: accept }, redirect: 'manual', cache: 'no-store', signal });
   if (!response.ok || !response.headers.get('content-type')?.includes(accept)) {
     throw new Error('Unexpected Substack response (' + response.status + ')');
   }
@@ -84,7 +85,7 @@ function likedItem(item) {
 }
 
 export async function publicLikes(fetchPage = fetch, signal = AbortSignal.timeout(30000)) {
-  const profilePage = await publicResponse(fetchPage, SUBSTACK_PROFILE, 'text/html', signal);
+  const profilePage = await publicResponse(fetchPage, PROFILE_LIKES_PAGE, 'text/html', signal);
   const html = await responseText(profilePage, 512 * 1024);
   const data = html.match(/<script[^>]+id="preloads-json"[^>]*>([^]*?)<\/script>/i)?.[1];
   const profile = data && JSON.parse(data).profile;
@@ -117,6 +118,10 @@ export async function publicLikes(fetchPage = fetch, signal = AbortSignal.timeou
 
 export default {
   async scheduled(_event, env) {
-    await refreshSubstack(env, LIKES_URL, async () => Response.json(await publicLikes()));
+    await refreshSubstack(env, LIKES_URL, async () => {
+      const snapshot = await publicLikes();
+      console.info(JSON.stringify({event: 'substack_public_snapshot', items: snapshot.items.length}));
+      return Response.json(snapshot);
+    });
   },
 };

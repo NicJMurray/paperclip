@@ -30,6 +30,7 @@ test('public likes follow Substack cursors and preserve original content and vid
     if (calls.length === 2) return page([note, {...post, post:{...post.post,audience:'only_paid'}}], 'second-page');
     return page([post]);
   });
+  assert.equal(new URL(calls[0]).searchParams.get('tab'), 'likes');
   assert.equal(new URL(calls[1]).searchParams.get('types[]'), 'like');
   assert.equal(new URL(calls[2]).searchParams.get('cursor'), 'second-page');
   const normalized = await normalizeSubstackFeed(feed);
@@ -46,7 +47,7 @@ test('the public likes reader honors profile visibility and rejects incomplete l
     assert.equal(new URL(url).pathname, '/@nicjm');
     return profile(false);
   })).items, []);
-  const first = new URL('https://substack.com/@nicjm');
+  const first = new URL('https://substack.com/@nicjm?tab=likes');
   const reply = url => new URL(url).href === first.href ? profile(true) : page([note], 'same-cursor');
   await assert.rejects(publicLikes(reply), /cursor repeated/);
   await assert.rejects(publicLikes(() => new Response('', {status:429})), /429/);
