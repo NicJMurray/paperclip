@@ -4,6 +4,7 @@
   "pages_build_output_dir": "dist",
   "compatibility_date": "2026-10-30",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": { "SUBSTACK_CRON_FEED": "1" },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "paperclip",

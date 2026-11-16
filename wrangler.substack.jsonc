@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "paperclip-substack-likes",
+  "main": "server/substack-cron.js",
+  "compatibility_date": "2026-11-16",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "paperclip",
+      "database_id": "1395d63b-ad48-4243-98fe-c94d94b4f937",
+      "migrations_dir": "server/migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "17 7 * * MON,THU"
+    ]
+  }
+}

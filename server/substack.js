@@ -1,4 +1,4 @@
-const SUBSTACK_PROFILE = 'https://substack.com/@nicjm';
+export const SUBSTACK_PROFILE = 'https://substack.com/@nicjm';
 const FEED_LIMIT = 1024 * 1024;
 const SYNC_INTERVAL = 60 * 60 * 1000;
 
@@ -49,7 +49,7 @@ export function sharedSubstackLink(value) {
   return { url: post.url, attribute: 'data-post-link' };
 }
 
-const IMAGE_HOSTS = ['substackcdn.com', 'substack-post-media.s3.amazonaws.com', 'substack-video.s3.amazonaws.com'];
+const IMAGE_HOSTS = ['substackcdn.com', 'substack-post-media.s3.amazonaws.com', 'substack-video.s3.amazonaws.com', 'image.mux.com'];
 const VIDEO_HOSTS = ['substackcdn.com', 'substack-video.s3.amazonaws.com', 'stream.mux.com'];
 
 function originalImage(value) {
