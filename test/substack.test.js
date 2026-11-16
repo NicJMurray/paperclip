@@ -145,13 +145,21 @@ test('shared Substack URLs expose official previews only after curation publishe
   }
 });
 
-test('synced Substack videos also offer the official preview as a fallback', async () => {
+test('synced Substack videos have a single direct player URL on the collection', async () => {
   const id = randomUUID();
   await db.prepare("INSERT INTO feed_items(id,source,url,created_at,category,media,source_key) VALUES (?,'substack',?,?,'videos','[]','note:c-9001')")
     .bind(id, 'https://substack.com/@author/note/c-9001', liked).run();
   const call = path => mf.dispatchFetch('https://paperclip.test' + path);
   const feed = await (await call('/api/items?tag=substack&category=videos')).json();
-  assert.equal(feed.items.find(item => item.id === id).embed_url, '/embed/substack/' + id);
+  const video = feed.items.find(item => item.id === id);
+  assert.equal(video.embed_url, '/embed/substack/' + id);
+  const player = new URL(video.player_url);
+  assert.equal(player.origin, 'https://substack.com');
+  assert.equal(player.pathname, '/embed/c/9001');
+  assert.equal(player.searchParams.get('origin'), 'https://paperclip.test');
+  assert.equal(player.searchParams.get('fullURL'), 'https://paperclip.test/');
+  const homepage = await call('/');
+  assert.match(homepage.headers.get('Content-Security-Policy'), /frame-src 'self' https:\/\/substack\.com/);
   const preview = await call('/embed/substack/' + id);
   assert.equal(preview.status, 200);
   assert.match(await preview.text(), /https:\/\/substack\.com\/embed\/c\/9001/);

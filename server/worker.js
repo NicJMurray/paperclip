@@ -9,7 +9,7 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://image.mux.com https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self'; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://image.mux.com https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self' https://substack.com https://*.substack.com; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'Cache-Control': 'no-store',
 };
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -162,7 +162,8 @@ const externalCollection = String.raw`
 `;
 
 async function collection(request, env, context) {
-  const search = new URL(request.url).searchParams;
+  const requestURL = new URL(request.url);
+  const search = requestURL.searchParams;
   const query = (search.get('q') || '').slice(0,200).trim().split(/\s+/).filter(Boolean).slice(0,10);
   const category = (search.get('category') || '').slice(0,64);
   const tag = (search.get('tag') || '').slice(0,80);
@@ -188,15 +189,28 @@ async function collection(request, env, context) {
   const { results } = pageResult;
   const page = results.slice(0, 100);
   const last = page.at(-1);
-  const items = page.map(({ source, media, ...row }) => ({
-    ...row,
-    tags: JSON.parse(row.tags),
-    image_url: row.kind === 'image' ? `/media/${row.id}` : null,
-    ...(source ? { source, media: JSON.parse(media) } : {}),
-    ...((!source || row.category === 'videos') && sharedSubstackLink(row.url)
-      ? { embed_url: `/embed/substack/${row.id}` } : {}),
-  }));
+  const items = page.map(({ source, media, ...row }) => {
+    const link = (!source || row.category === 'videos') && sharedSubstackLink(row.url);
+    return {
+      ...row,
+      tags: JSON.parse(row.tags),
+      image_url: row.kind === 'image' ? `/media/${row.id}` : null,
+      ...(source ? { source, media: JSON.parse(media) } : {}),
+      ...(link ? { embed_url: `/embed/substack/${row.id}` } : {}),
+      ...(link && row.category === 'videos' ? { player_url: substackPlayerURL(link, requestURL.origin).href } : {}),
+    };
+  });
   return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
+}
+
+function substackPlayerURL(link, origin) {
+  const source = new URL(link.url);
+  const destination = link.attribute === 'data-comment-link'
+    ? new URL('/embed/c/' + source.pathname.split('/').at(-1).slice(2), 'https://substack.com')
+    : new URL('/embed' + source.pathname, source.origin);
+  destination.searchParams.set('origin', origin);
+  destination.searchParams.set('fullURL', origin + '/');
+  return destination;
 }
 
 async function substackEmbed(request, id, env) {
@@ -209,12 +223,7 @@ async function substackEmbed(request, id, env) {
   if (!link) throw new HttpError(404, 'Not found.');
 
   const source = new URL(link.url);
-  const origin = new URL(request.url).origin;
-  const destination = link.attribute === 'data-comment-link'
-    ? new URL('/embed/c/' + source.pathname.split('/').at(-1).slice(2), 'https://substack.com')
-    : new URL('/embed' + source.pathname, source.origin);
-  destination.searchParams.set('origin', origin);
-  destination.searchParams.set('fullURL', origin + '/');
+  const destination = substackPlayerURL(link, new URL(request.url).origin);
 
   const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
   const policy = [

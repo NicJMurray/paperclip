@@ -93,15 +93,47 @@ function importedMedia(attachment, original, reference) {
 
 const substackFrames = new WeakMap();
 window.addEventListener('message', event => {
-  if (event.origin !== location.origin || !event.source || event.data?.type !== 'paperclip:embed-height') return;
-  const frame = substackFrames.get(event.source);
-  const height = event.data.height;
-  if (frame && Number.isFinite(height)) frame.height = Math.min(800, Math.max(56, Math.ceil(height) + 4));
+  const player = substackFrames.get(event.source);
+  if (!player || event.origin !== player.origin) return;
+  const height = player.fallback
+    ? Number(event.data?.iframeHeight)
+    : event.data?.type === 'paperclip:embed-height' ? event.data.height : undefined;
+  if (!Number.isFinite(height) || height <= 0) return;
+  player.frame.height = Math.min(2400, Math.max(56, Math.ceil(height)));
+  if (player.fallback) {
+    player.frame.dataset.sized = 'true';
+    player.fallback.hidden = true;
+  }
 });
 
-function substackPreview(path, isVideo) {
+function playerFrame(src, title) {
+  const frame = element('iframe');
+  frame.title = title;
+  frame.allow = 'fullscreen; picture-in-picture; encrypted-media';
+  frame.allowFullscreen = true;
+  frame.src = src;
+  return frame;
+}
+
+function substackVideoCard(item, original) {
+  const card = element('article', 'substack-video-card');
+  const frame = playerFrame(item.player_url, item.title || 'Substack video');
+  frame.loading = 'lazy';
+  frame.height = 520;
+  const fallback = sourceLink(original, 'Open on Substack', 'substack-video-fallback');
+  fallback.hidden = true;
+  frame.addEventListener('load', () => {
+    setTimeout(() => {
+      if (frame.isConnected && !frame.dataset.sized) fallback.hidden = false;
+    }, 8000);
+  }, { once: true });
+  card.append(frame, fallback);
+  return card;
+}
+
+function substackPreview(path) {
   const preview = element('details', 'substack-preview');
-  preview.append(element('summary', '', isVideo ? 'Play on Paperclip' : 'Preview on Paperclip'));
+  preview.append(element('summary', '', 'Preview on Paperclip'));
   let frame;
   preview.addEventListener('toggle', () => {
     if (!preview.open) {
@@ -113,20 +145,17 @@ function substackPreview(path, isVideo) {
       return;
     }
     if (frame) return;
-    frame = element('iframe');
-    frame.title = 'Substack preview';
+    frame = playerFrame(path, 'Substack preview');
     frame.height = 200;
-    frame.allow = 'fullscreen; picture-in-picture; encrypted-media';
-    frame.allowFullscreen = true;
-    frame.src = path;
     preview.append(frame);
-    substackFrames.set(frame.contentWindow, frame);
+    substackFrames.set(frame.contentWindow, { frame, origin: location.origin });
   });
   return preview;
 }
 
 function card(item) {
   const url = safeURL(item.url);
+  if (item.player_url && url) return substackVideoCard(item, url);
   const article = element('article',url ? 'card card--link' : 'card');
   if (item.source) article.classList.add('card--source');
   const attachments = item.source && url && Array.isArray(item.media) ? item.media : [];
@@ -159,7 +188,7 @@ function card(item) {
       if (figure) content.append(figure);
     }
   }
-  if (item.embed_url) content.append(substackPreview(item.embed_url, item.category === 'videos'));
+  if (item.embed_url) content.append(substackPreview(item.embed_url));
   const tags = element('div','tags');
   for (const tag of (Array.isArray(item.tags) ? item.tags : [])) { const button = element('button','tag',`#${tag}`); button.addEventListener('click',()=>{state.tag=tag;void load(true);}); tags.append(button); }
   content.append(tags);
@@ -179,6 +208,13 @@ function render() {
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
   for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
   $('items').replaceChildren(...items.map(card));
+  for (const frame of $('items').querySelectorAll('.substack-video-card iframe')) {
+    substackFrames.set(frame.contentWindow, {
+      frame,
+      origin: new URL(frame.src).origin,
+      fallback: frame.nextElementSibling,
+    });
+  }
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;
