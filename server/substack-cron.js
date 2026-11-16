@@ -32,6 +32,18 @@ async function responseText(response, limit) {
   }
 }
 
+function publicVideo(upload, host = 'substack.com', poster = null) {
+  if (upload?.state !== 'transcoded' || upload.copyright_infringement ||
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(upload.id ?? '')) return [];
+  return [{
+    type: 'video',
+    url: 'https://' + host + '/api/v1/video/upload/' + upload.id + '/src?type=mp4',
+    width: upload.width,
+    height: upload.height,
+    poster,
+  }];
+}
+
 function likedItem(item) {
   if (item.context?.type === 'note_like' && item.type === 'comment') {
     const note = item.comment;
@@ -41,7 +53,7 @@ function likedItem(item) {
       if (attachment.type === 'image') {
         return [{type: 'image', url: attachment.imageUrl, width: attachment.imageWidth, height: attachment.imageHeight}];
       }
-      return [];
+      return attachment.type === 'video' ? publicVideo(attachment.mediaUpload) : [];
     });
     return {
       public: true,
@@ -58,6 +70,10 @@ function likedItem(item) {
   const post = item.post;
   if (post?.audience !== 'everyone' || post.is_published !== true || item.publication?.invite_only ||
       post.is_geoblocked || post.is_editor_preview) return null;
+  const publication = item.publication?.subdomain;
+  const host = typeof publication === 'string' && /^[a-z0-9-]+$/i.test(publication)
+    ? publication + '.substack.com' : 'substack.com';
+  const videos = publicVideo(post.videoUpload, host, post.cover_image);
   return {
     public: true,
     type: 'post',
@@ -66,7 +82,7 @@ function likedItem(item) {
     published_at: post.post_date,
     title: post.title,
     summary: post.subtitle ?? post.description,
-    media: post.cover_image ? [{type: 'image', url: post.cover_image}] : [],
+    media: videos.length ? videos : post.cover_image ? [{type: 'image', url: post.cover_image}] : [],
     video: post.type === 'video' || Boolean(post.video_upload_id),
   };
 }

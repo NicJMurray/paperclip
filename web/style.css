@@ -26,3 +26,13 @@
 .substack-video-card iframe{display:block;width:100%;border:0}
 .substack-video-card iframe:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
 .substack-video-fallback{display:inline-block;margin:10px 0;color:var(--green);font-size:13px;text-decoration:underline}
+
+.paperclip-video-card{min-height:0}
+.video-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px 10px 16px}
+.paperclip-video-card h2{margin:0;font-size:18px;line-height:1.35}
+.paperclip-video-card h2 a{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.paperclip-video-card h2 a:after{content:none}
+.paperclip-video-card video{display:block;width:100%;max-height:65svh;aspect-ratio:16/9;object-fit:contain;background:#171c18}
+.paperclip-video-card video.portrait{width:min(100%,36.5625svh);aspect-ratio:9/16;margin-inline:auto}
+.video-sound{flex-shrink:0;min-width:44px;min-height:44px;display:grid;place-items:center;font-size:16px;line-height:1;border:0;border-radius:8px;background:transparent;color:var(--green)}
+.video-sound:hover,.video-sound:focus-visible{background:#eef0e7}
