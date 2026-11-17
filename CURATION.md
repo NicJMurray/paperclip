@@ -1,5 +1,7 @@
 # Paperclip curation
 
+The scheduled Cloudflare inbox curator handles supported public links automatically. Use the steps below for manual review of held items. The automated Worker preserves held records and does not inspect standalone images or text.
+
 The owner has authorised automatically publishing the organised collection at https://paperclip.njmurray.com. Capture must remain frictionless: never ask for categories or tags while sharing.
 
 Use the connected Cloudflare tool to query D1 database `1395d63b-ad48-4243-98fe-c94d94b4f937` in account `22c1482ec05957092be7a2df424c4543`. Authenticate through the connection, not a new app token. The query endpoint is `/accounts/{account_id}/d1/database/{database_id}/query`, method POST, with `{sql, params}` or `{batch:[{sql,params},...]}`.
