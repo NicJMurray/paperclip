@@ -34,5 +34,9 @@
 .paperclip-video-card h2 a:after{content:none}
 .paperclip-video-card video{display:block;width:100%;max-height:65svh;aspect-ratio:16/9;object-fit:contain;background:#171c18}
 .paperclip-video-card video.portrait{width:min(100%,36.5625svh);aspect-ratio:9/16;margin-inline:auto}
+.video-stage{position:relative}
+.video-start{position:absolute;inset:50% auto auto 50%;transform:translate(-50%,-50%);width:48px;height:48px;border:0;border-radius:50%;background:#fbfaf6;color:var(--green);line-height:1}
+.video-embed-start{padding:18px;border:0;background:none;color:var(--green);text-align:left;overflow-wrap:anywhere}
+.video-embed-start:focus-visible{outline-offset:-5px}
 .video-sound{flex-shrink:0;min-width:44px;min-height:44px;display:grid;place-items:center;font-size:16px;line-height:1;border:0;border-radius:8px;background:transparent;color:var(--green)}
 .video-sound:hover,.video-sound:focus-visible{background:#eef0e7}

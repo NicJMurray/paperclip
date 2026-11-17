@@ -58,6 +58,13 @@ function firstPartyVideo(url) {
     VIDEO_UPLOAD_PATH.test(url.pathname) && url.search === '?type=mp4' && !url.hash;
 }
 
+export function substackStreamSource(value) {
+  const url = secureURL(value);
+  if (!url || !firstPartyVideo(url)) return null;
+  url.searchParams.set('type', 'hls');
+  return url;
+}
+
 function originalImage(value) {
   const url = secureURL(value);
   return url && IMAGE_HOSTS.includes(url.hostname) ? url.href : null;

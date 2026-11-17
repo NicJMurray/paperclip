@@ -1,5 +1,6 @@
 export function createVideoFeed(view) {
   const players = new Map();
+  const autoplay = view.matchMedia('(hover: none) and (pointer: coarse)');
   let active = null;
   let muted = true;
   let attempt = 0;
@@ -31,21 +32,32 @@ export function createVideoFeed(view) {
     if (previous) {
       previous.pause();
       mute(previous, true);
+      players.get(previous).release();
     }
     if (video) mute(video, muted);
     updateButtons();
   }
 
-  function start(video) {
+  async function start(video) {
     const id = ++attempt;
     mute(video, muted);
     updateButtons();
-    video.play().catch(error => {
+    try {
+      const loading = players.get(video).prepare();
+      if (loading) await loading;
+      if (id === attempt) await video.play();
+    } catch (error) {
       if (id !== attempt || active !== video || silent(video) || error?.name !== 'NotAllowedError') return;
       mute(video, true);
       updateButtons();
       video.play().catch(() => {});
-    });
+    }
+  }
+
+  function play(video) {
+    if (!players.has(video)) return;
+    setActive(video);
+    void start(video);
   }
 
   function pickVisible() {
@@ -72,21 +84,22 @@ export function createVideoFeed(view) {
     scheduled = true;
     view.requestAnimationFrame(() => {
       scheduled = false;
+      if (!autoplay.matches) return;
       const video = pickVisible();
       if (video === active) return;
       setActive(video);
-      if (video) start(video);
+      if (video) void start(video);
     });
   }
 
-  function track(video, button) {
-    const player = {button, expectedMute: silent(video)};
+  function track(video, button, {prepare = () => {}, release = () => {}} = {}) {
+    const player = {button, prepare, release, expectedMute: silent(video)};
     players.set(video, player);
     button.setAttribute('aria-label', 'Video sound');
     button.addEventListener('click', () => {
       muted = video === active ? !silent(video) : !muted;
       setActive(video);
-      if (video.paused) start(video);
+      if (video.paused) void start(video);
       else {
         mute(video, muted);
         updateButtons();
@@ -120,9 +133,13 @@ export function createVideoFeed(view) {
 
   view.addEventListener('scroll', update, {passive: true});
   view.addEventListener('resize', update);
+  autoplay.addEventListener('change', () => {
+    if (autoplay.matches) update();
+    else setActive(null);
+  });
   view.document.addEventListener('visibilitychange', () => {
     if (view.document.hidden) setActive(null);
     else update();
   });
-  return {track, forget, clear, update};
+  return {track, play, forget, clear, update};
 }

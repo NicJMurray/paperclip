@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createVideoFeed } from '../web/video-feed.js';
 
-function fixture() {
+function fixture(autoplay = true) {
   const view = new EventTarget();
   view.innerHeight = 800;
   view.innerWidth = 400;
   view.document = new EventTarget();
   view.document.hidden = false;
+  const pointer = new EventTarget();
+  pointer.matches = autoplay;
+  view.matchMedia = () => pointer;
   const callbacks = [];
   view.requestAnimationFrame = callback => callbacks.push(callback);
   const move = positions => {
@@ -106,4 +109,27 @@ test('browser sound restrictions fall back to silent playback and preserve the c
   assert.equal(next.video.muted, false);
   feed.clear();
   assert.equal(next.video.paused, true);
+});
+
+test('desktop waits for an explicit play and mobile stops loading the clip it leaves', async () => {
+  for (const autoplay of [false, true]) {
+    const {feed, move} = fixture(autoplay);
+    const first = player(), second = player();
+    const loads = [], releases = [];
+    for (const p of [first, second]) {
+      feed.track(p.video, p.button, {prepare: () => { loads.push(p); }, release: () => { releases.push(p); }});
+    }
+    move([[first.video,175],[second.video,850]]);
+    await flush();
+    assert.deepEqual(loads, autoplay ? [first] : []);
+    if (!autoplay) feed.play(first.video);
+    move([[first.video,-500],[second.video,170]]);
+    await flush();
+    assert.deepEqual(loads, autoplay ? [first, second] : [first]);
+    assert.deepEqual(releases, autoplay ? [first] : []);
+    if (!autoplay) feed.play(second.video);
+    assert.deepEqual(releases, [first]);
+    assert.equal(first.video.paused, true);
+    assert.equal(second.video.paused, false);
+  }
 });

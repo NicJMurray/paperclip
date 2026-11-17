@@ -121,29 +121,24 @@ function playerFrame(src, title) {
 }
 
 function substackVideoCard(item, original) {
-  const card = element('article', 'substack-video-card');
-  const frame = playerFrame(item.player_url, item.title || 'Substack video');
-  frame.loading = 'lazy';
-  frame.height = 520;
-  const fallback = sourceLink(original, 'Open on Substack', 'substack-video-fallback');
-  fallback.hidden = true;
-  frame.addEventListener('load', () => {
+  const card = element('article', 'card paperclip-video-card substack-video-card');
+  const title = item.title || item.summary?.split(/\n\s*\n/)[0]?.trim();
+  const play = element('button', 'video-embed-start', title ? '▶ ' + title : '▶ Play video');
+  play.type = 'button';
+  play.addEventListener('click', () => {
+    const frame = playerFrame(item.player_url, title || 'Substack video');
+    frame.height = 520;
+    const fallback = sourceLink(original, 'Open on Substack', 'substack-video-fallback');
+    fallback.hidden = true;
+    card.replaceChildren(frame, fallback);
+    substackFrames.set(frame.contentWindow, {frame, origin: new URL(frame.src).origin, fallback});
     setTimeout(() => {
       if (frame.isConnected && !frame.dataset.sized) fallback.hidden = false;
     }, 8000);
+    frame.focus();
   }, { once: true });
-  card.append(frame, fallback);
+  card.append(play);
   return card;
-}
-
-function registerSubstackFrames(container) {
-  for (const frame of container.querySelectorAll('.substack-video-card iframe')) {
-    substackFrames.set(frame.contentWindow, {
-      frame,
-      origin: new URL(frame.src).origin,
-      fallback: frame.nextElementSibling,
-    });
-  }
 }
 
 function directVideoCard(item, original, media) {
@@ -159,25 +154,110 @@ function directVideoCard(item, original, media) {
   sound.type = 'button';
   heading.append(sound);
 
+  const stage = element('div', 'video-stage');
   const video = element('video', media.portrait ? 'portrait' : '');
-  video.controls = true;
+  const play = element('button', 'video-start', '▶');
+  play.type = 'button';
+  play.setAttribute('aria-label', title ? 'Play ' + title : 'Play video');
+  play.addEventListener('click', () => {
+    scrollingVideos.play(video);
+    video.focus();
+  });
   video.playsInline = true;
   video.defaultMuted = true;
   video.muted = true;
   video.preload = 'none';
   video.setAttribute('aria-label', title || 'Substack video');
   if (media.poster) video.poster = media.poster;
-  video.src = media.url;
+  const stream = item.stream_url || (media.format === 'hls' ? media.url : null);
+  const mp4 = media.format === 'hls' ? null : media.url;
+  let mode = null;
+  let player;
+  let loading;
+  let generation = 0;
+  let resumeAt = 0;
 
-  video.addEventListener('error', () => {
-    if (!card.isConnected) return;
+  function playMP4() {
+    mode = 'mp4';
+    loading = null;
+    player?.destroy();
+    player = null;
+    video.src = mp4;
+    if (resumeAt) video.currentTime = resumeAt;
+  }
+
+  function fallback() {
+    if (!mode || !card.isConnected) return;
+    if (mode === 'stream' && mp4) {
+      if (video.currentTime > 0) resumeAt = video.currentTime;
+      playMP4();
+      scrollingVideos.play(video);
+      return;
+    }
     scrollingVideos.forget(video);
-    const fallback = substackVideoCard(item, original);
-    card.replaceWith(fallback);
-    registerSubstackFrames($('items'));
-  }, {once: true});
-  card.append(heading, video);
-  scrollingVideos.track(video, sound);
+    card.replaceWith(substackVideoCard(item, original));
+  }
+
+  async function loadStream(id) {
+    try {
+      const Hls = await hlsLibrary();
+      if (id !== generation) return;
+      if (!Hls?.isSupported()) throw new Error('Streaming unavailable');
+      player = new Hls({
+        enableWorker: false, startLevel: 0, autoStartLoad: false,
+        maxBufferLength: 8, maxMaxBufferLength: 12, backBufferLength: 5,
+      });
+      player.on(Hls.Events.MANIFEST_PARSED, () => {
+        const cap = player.levels.findLastIndex(level => Math.min(level.width, level.height) <= 480);
+        player.autoLevelCapping = Math.max(0, cap);
+        player.startLoad(resumeAt || -1);
+      });
+      player.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal && id === generation && mode === 'stream') fallback();
+      });
+      player.loadSource(stream);
+      player.attachMedia(video);
+    } catch {
+      if (id === generation) fallback();
+    }
+  }
+
+  function prepare() {
+    if (mode) return loading;
+    play.hidden = true;
+    video.controls = true;
+    if (!stream) {
+      playMP4();
+      return;
+    }
+    mode = 'stream';
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = stream;
+      if (resumeAt) video.currentTime = resumeAt;
+      return;
+    }
+    loading = loadStream(generation);
+    return loading;
+  }
+
+  function release() {
+    if (!mode) return;
+    if (video.currentTime > 0) resumeAt = video.ended ? 0 : video.currentTime;
+    generation++;
+    mode = null;
+    loading = null;
+    player?.destroy();
+    player = null;
+    video.removeAttribute('src');
+    video.load();
+    video.controls = false;
+    play.hidden = false;
+  }
+
+  video.addEventListener('error', () => { if (!player) fallback(); });
+  stage.append(video, play);
+  card.append(heading, stage);
+  scrollingVideos.track(video, sound, {prepare, release});
   return card;
 }
 
@@ -206,7 +286,7 @@ function substackPreview(path) {
 function card(item) {
   const url = safeURL(item.url);
   if (item.player_url && url) {
-    const media = item.media?.find(attachment => attachment.type === 'video' && attachment.format !== 'hls');
+    const media = item.media?.find(attachment => attachment.type === 'video');
     return media ? directVideoCard(item, url, media) : substackVideoCard(item, url);
   }
   const article = element('article',url ? 'card card--link' : 'card');
@@ -262,7 +342,6 @@ function render() {
   for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
   scrollingVideos.clear();
   $('items').replaceChildren(...items.map(card));
-  registerSubstackFrames($('items'));
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;
