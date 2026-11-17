@@ -15,7 +15,6 @@ const postURL = 'https://author.substack.com/p/article';
 const videoURL = 'https://substackcdn.com/video_upload/sample.mp4';
 const uploadPath = '/api/v1/video/upload/ab4fc201-bfa4-401d-8020-4289ef857093/src';
 const uploadSource = 'https://substack.com' + uploadPath;
-const muxStream = 'https://stream.mux.com/ExamplePlaybackID.m3u8?token=example';
 const snapshot = items => ({ profile, complete: true, items });
 const note = { type: 'note', public: true, url: noteURL, published_at: published, liked_at: '2026-11-16T09:30:00+01:00', summary: '<Original> wording & punctuation.' };
 const post = { type: 'post', public: true, url: postURL, published_at: published, title: 'Original title', summary: 'Original standfirst' };
@@ -27,11 +26,6 @@ before(async () => {
     modules: true, scriptPath: new URL('../dist/_worker.js', import.meta.url).pathname,
     compatibilityDate: '2026-10-30', compatibilityFlags: ['nodejs_compat'],
     d1Databases: { DB: 'substack-test' }, bindings: { SUBSTACK_LIKES_URL: feedURL.href },
-    outboundService: async request => {
-      if (request.url === uploadSource + '?type=hls') return Response.redirect(muxStream, 307);
-      if (new URL(request.url).hostname === 'other.substack.com') return Response.redirect('https://other.example/file.m3u8', 307);
-      return new Response(null, {status: 404});
-    },
   }));
   db = await mf.getD1Database('DB');
   const directory = new URL('../server/migrations/', import.meta.url);
@@ -177,21 +171,17 @@ test('synced Substack videos have a single direct player URL on the collection',
   assert.match(await preview.text(), /https:\/\/substack\.com\/embed\/c\/9001/);
 });
 
-test('adaptive playback redirects only imported public videos to the original CDN', async () => {
+test('public Substack uploads offer the provider’s native HLS URL alongside MP4', async () => {
   const query = db.prepare("INSERT INTO feed_items(id,source,url,created_at,category,media,source_key) VALUES (?,'substack',?,?,'videos',?,?)");
   const id = randomUUID(), other = randomUUID();
   await db.batch([
     query.bind(id, 'https://substack.com/@author/note/c-9910', liked, JSON.stringify([{type:'video',url:uploadSource + '?type=mp4'}]), 'note:c-9910'),
-    query.bind(other, 'https://substack.com/@author/note/c-9911', liked, JSON.stringify([{type:'video',url:'https://other.substack.com' + uploadPath + '?type=mp4'}]), 'note:c-9911'),
+    query.bind(other, 'https://substack.com/@author/note/c-9911', liked, JSON.stringify([{type:'video',url:videoURL}]), 'note:c-9911'),
   ]);
-  const call = path => mf.dispatchFetch('https://paperclip.test' + path, {redirect:'manual'});
+  const call = path => mf.dispatchFetch('https://paperclip.test' + path);
   const feed = await (await call('/api/items?tag=substack&category=videos')).json();
-  const stream = feed.items.find(item => item.id === id).stream_url;
-  assert.equal(stream, '/api/substack-stream/' + id);
-  const response = await call(stream);
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get('Location'), muxStream);
-  assert.equal(response.headers.get('Cache-Control'), 'no-store');
-  assert.equal((await call('/api/substack-stream/' + other)).status, 502);
-  assert.equal((await call('/api/substack-stream/' + randomUUID())).status, 404);
+  const upload = feed.items.find(item => item.id === id);
+  assert.equal(upload.native_stream_url, uploadSource + '?type=hls');
+  assert.equal(upload.media[0].url, uploadSource + '?type=mp4');
+  assert.equal(feed.items.find(item => item.id === other).native_stream_url, undefined);
 });

@@ -9,7 +9,7 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://image.mux.com https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src 'self' blob: https://substack.com https://*.substack.com https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self' https://substack.com https://*.substack.com; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://image.mux.com https://substackcdn.com https://substack-post-media.s3.amazonaws.com https://substack-video.s3.amazonaws.com; media-src blob: https://substack.com https://*.substack.com https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; frame-src 'self' https://substack.com https://*.substack.com; connect-src 'self' https://substackcdn.com https://substack-video.s3.amazonaws.com https://*.mux.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'Cache-Control': 'no-store',
 };
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -193,39 +193,18 @@ async function collection(request, env, context) {
     const link = (!source || row.category === 'videos') && sharedSubstackLink(row.url);
     const attachments = source ? JSON.parse(media) : null;
     const video = attachments?.find(item => item.type === 'video');
+    const stream = substackStreamSource(video?.url);
     return {
       ...row,
       tags: JSON.parse(row.tags),
       image_url: row.kind === 'image' ? `/media/${row.id}` : null,
       ...(source ? { source, media: attachments } : {}),
-      ...(substackStreamSource(video?.url) ? { stream_url: `/api/substack-stream/${row.id}` } : {}),
+      ...(stream ? { native_stream_url: stream.href } : {}),
       ...(link ? { embed_url: `/embed/substack/${row.id}` } : {}),
       ...(link && row.category === 'videos' ? { player_url: substackPlayerURL(link, requestURL.origin).href } : {}),
     };
   });
   return json({ items, categories: categories.results.map(row => row.category), next: results.length > 100 ? `${last.created_at}|${last.id}` : null });
-}
-
-async function substackStream(id, env) {
-  if (!UUID.test(id) || !(env.SUBSTACK_CRON_FEED === '1' || substackFeedURL(env))) {
-    throw new HttpError(404, 'Not found.');
-  }
-  const row = await env.DB.prepare("SELECT media FROM feed_items WHERE id = ? AND source = 'substack' AND category = 'videos'")
-    .bind(id).first();
-  const video = row && JSON.parse(row.media).find(item => item.type === 'video');
-  const source = substackStreamSource(video?.url);
-  if (!source) throw new HttpError(404, 'Not found.');
-
-  // Forward the provider-issued redirect for this public video. Video bytes stay on the provider's CDN.
-  const upstream = await fetch(source.href, { redirect: 'manual', signal: AbortSignal.timeout(4000) }).catch(() => null);
-  const location = upstream?.headers.get('Location');
-  const destination = location && URL.parse(location);
-  if (!upstream || ![301, 302, 303, 307, 308].includes(upstream.status) ||
-      destination?.origin !== 'https://stream.mux.com' || destination.username || destination.password ||
-      !/^\/[a-z0-9]+\.m3u8$/i.test(destination.pathname)) {
-    throw new HttpError(502, 'Stream unavailable.');
-  }
-  return new Response(null, { status: 302, headers: { ...HEADERS, Location: destination.href } });
 }
 
 function substackPlayerURL(link, origin) {
@@ -320,7 +299,6 @@ export default {
       if (request.method === 'DELETE' && pathname.startsWith('/api/queue/')) return await discard(request, env, pathname.slice(11));
       if (request.method === 'GET' && pathname === '/api/device') { await authenticate(request, env); return json({ connected: true }); }
       if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env, context);
-      if (request.method === 'GET' && pathname.startsWith('/api/substack-stream/')) return await substackStream(pathname.slice('/api/substack-stream/'.length), env);
       if (request.method === 'GET' && pathname.startsWith('/embed/substack/')) return await substackEmbed(request, pathname.slice('/embed/substack/'.length), env);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);
       if (request.method === 'GET' && pathname === '/api/health') { await env.DB.prepare('SELECT 1').first(); return json({ ok: true }); }

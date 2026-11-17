@@ -169,7 +169,9 @@ function directVideoCard(item, original, media) {
   video.preload = 'none';
   video.setAttribute('aria-label', title || 'Substack video');
   if (media.poster) video.poster = media.poster;
-  const stream = item.stream_url || (media.format === 'hls' ? media.url : null);
+  const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
+  // The Substack upload URL works in a native player, while Hls.js needs a cross-origin manifest.
+  const stream = media.format === 'hls' ? media.url : nativeHls ? item.native_stream_url : null;
   const mp4 = media.format === 'hls' ? null : media.url;
   let mode = null;
   let player;
@@ -231,7 +233,7 @@ function directVideoCard(item, original, media) {
       return;
     }
     mode = 'stream';
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    if (nativeHls) {
       video.src = stream;
       if (resumeAt) video.currentTime = resumeAt;
       return;
