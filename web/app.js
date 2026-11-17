@@ -1,11 +1,6 @@
 import { createVideoFeed } from './video-feed.js';
 
 const state = { items: [], categories: [], category: 'all', tag: '', query: '', cursor: null, busy: false, failed: false, serial: 0 };
-let playback = matchMedia('(hover: none) and (pointer: coarse)').matches ? 'inline' : 'adaptive';
-try {
-  const preference = localStorage.getItem('paperclip-video-playback');
-  if (preference === 'adaptive' || preference === 'inline') playback = preference;
-} catch { /* playback still works when storage is disabled */ }
 const $ = id => document.getElementById(id);
 const label = value => value.charAt(0).toUpperCase() + value.slice(1);
 const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
@@ -115,22 +110,16 @@ function importedMedia(attachment, original, reference) {
 }
 
 const scrollingVideos = createVideoFeed(window);
+const touchPlayback = matchMedia('(hover: none) and (pointer: coarse)');
 new ResizeObserver(scrollingVideos.update).observe($('items'));
 
 const substackFrames = new WeakMap();
-let closeSubstackVideo;
 window.addEventListener('message', event => {
   const player = substackFrames.get(event.source);
-  if (!player || event.origin !== player.origin) return;
-  const height = player.fallback
-    ? Number(event.data?.iframeHeight)
-    : event.data?.type === 'paperclip:embed-height' ? event.data.height : undefined;
+  if (!player || event.origin !== player.origin || event.data?.type !== 'paperclip:embed-height') return;
+  const height = event.data.height;
   if (!Number.isFinite(height) || height <= 0) return;
   player.frame.height = Math.min(2400, Math.max(56, Math.ceil(height)));
-  if (player.fallback) {
-    player.frame.dataset.sized = 'true';
-    player.fallback.hidden = true;
-  }
 });
 
 function playerFrame(src, title) {
@@ -146,7 +135,8 @@ function videoHeading(title, original) {
   const heading = element('div', 'video-heading');
   if (title) {
     const h2 = element('h2');
-    h2.append(sourceLink(original, title));
+    if (original) h2.append(sourceLink(original, title));
+    else h2.textContent = title;
     heading.append(h2);
   }
   return heading;
@@ -158,45 +148,27 @@ function videoPoster(url) {
   image.alt = '';
   image.loading = 'lazy';
   image.decoding = 'async';
+  image.fetchPriority = 'low';
   image.src = url;
   image.addEventListener('error', () => image.remove(), { once: true });
   return image;
 }
 
-function substackVideoCard(item, original, media) {
-  const card = element('article', 'card paperclip-video-card substack-video-card');
+function linkedVideoCard(item, original, media) {
+  const card = element('article', 'card paperclip-video-card');
   const title = item.title || item.summary?.split(/\n\s*\n/)[0]?.trim();
-  const play = media
-    ? element('button', 'video-start', '▶')
-    : element('button', 'video-embed-start', title ? '▶ ' + title : '▶ Play video');
-  play.type = 'button';
-  play.setAttribute('aria-label', title ? 'Open adaptive player for ' + title : 'Open adaptive player');
-  let preview = [play];
-  if (media) {
-    const stage = element('div', media.portrait ? 'video-stage video-embed-stage portrait' : 'video-stage video-embed-stage');
-    const poster = videoPoster(media.poster);
-    if (poster) stage.append(poster);
-    stage.append(play);
-    preview = [videoHeading(title, original), stage];
+  const poster = videoPoster(media?.poster);
+  const heading = videoHeading(title, poster ? null : original);
+  if (poster) {
+    const stage = element('div', media.portrait ? 'video-stage video-link-stage portrait' : 'video-stage video-link-stage');
+    const link = sourceLink(original, '↗', 'video-start video-source');
+    link.setAttribute('aria-label', title ? 'Watch ' + title + ' on Substack' : 'Watch on Substack');
+    stage.append(poster, link);
+    card.append(heading, stage);
+  } else {
+    if (!title) heading.append(sourceLink(original, 'Watch on Substack'));
+    card.append(heading);
   }
-  card.append(...preview);
-  play.addEventListener('click', () => {
-    closeSubstackVideo?.();
-    const frame = playerFrame(item.player_url, title || 'Substack video');
-    frame.height = 520;
-    const fallback = sourceLink(original, 'Open on Substack', 'substack-video-fallback');
-    fallback.hidden = true;
-    card.replaceChildren(frame, fallback);
-    substackFrames.set(frame.contentWindow, {frame, origin: new URL(frame.src).origin, fallback});
-    closeSubstackVideo = () => {
-      substackFrames.delete(frame.contentWindow);
-      card.replaceChildren(...preview);
-    };
-    setTimeout(() => {
-      if (frame.isConnected && !frame.dataset.sized) fallback.hidden = false;
-    }, 8000);
-    frame.focus();
-  });
   return card;
 }
 
@@ -211,7 +183,6 @@ function directVideoCard(item, original, media) {
   const stage = element('div', 'video-stage');
   const video = element('video', media.portrait ? 'portrait' : '');
   const poster = videoPoster(media.poster);
-  if (poster) video.addEventListener('playing', () => { poster.hidden = true; });
   const play = element('button', 'video-start', '▶');
   play.type = 'button';
   play.setAttribute('aria-label', title ? 'Play ' + title : 'Play video');
@@ -219,63 +190,50 @@ function directVideoCard(item, original, media) {
     scrollingVideos.play(video);
     video.focus();
   });
+  video.addEventListener('playing', () => {
+    play.hidden = true;
+    if (poster) poster.hidden = true;
+  });
   video.playsInline = true;
   video.defaultMuted = true;
   video.muted = true;
   video.preload = 'none';
   video.setAttribute('aria-label', title || 'Substack video');
-  const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
-  // The Substack upload URL works in a native player, while Hls.js needs a cross-origin manifest.
-  const stream = media.format === 'hls' ? media.url : nativeHls ? item.native_stream_url : null;
-  const mp4 = media.format === 'hls' ? null : media.url;
-  const direct = !stream || nativeHls;
+  const streamed = media.format === 'hls';
+  // Try HLS only when the source explicitly supplies a playlist. The optional
+  // Substack upload redirect can fail even when canPlayType reports support.
+  const direct = !streamed || video.canPlayType('application/vnd.apple.mpegurl');
+  if (touchPlayback.matches && !navigator.connection?.saveData && videoOrigins.size === 0) {
+    warmVideoConnections(media.url);
+  }
   stage.addEventListener('pointerenter', event => {
-    if (event.pointerType === 'mouse') warmVideoConnections(stream || mp4);
+    if (event.pointerType === 'mouse') warmVideoConnections(media.url);
   });
-  play.addEventListener('focus', () => warmVideoConnections(stream || mp4));
-  let mode = null;
+  play.addEventListener('focus', () => warmVideoConnections(media.url));
+  let attached = false;
   let prefetched = false;
   let player;
   let loading;
   let generation = 0;
   let resumeAt = 0;
 
-  function playMP4() {
-    mode = 'mp4';
-    loading = null;
-    player?.destroy();
-    player = null;
-    video.src = mp4;
-    if (resumeAt) video.currentTime = resumeAt;
-  }
-
   function loadDirect() {
-    if (!stream) {
-      playMP4();
-      return;
-    }
-    mode = 'stream';
-    video.src = stream;
+    attached = true;
+    video.src = media.url;
     if (resumeAt) video.currentTime = resumeAt;
   }
 
   function warm() {
-    if (mode) return;
+    if (attached) return;
     prefetched = true;
     video.preload = 'metadata';
     loadDirect();
   }
 
   function fallback() {
-    if (!mode || !card.isConnected) return;
-    if (mode === 'stream' && mp4) {
-      if (video.currentTime > 0) resumeAt = video.currentTime;
-      playMP4();
-      scrollingVideos.play(video);
-      return;
-    }
+    if (!attached || !card.isConnected) return;
     scrollingVideos.forget(video);
-    card.replaceWith(substackVideoCard(item, original, media));
+    card.replaceWith(linkedVideoCard(item, original, media));
   }
 
   async function loadStream(id) {
@@ -293,9 +251,9 @@ function directVideoCard(item, original, media) {
         player.startLoad(resumeAt || -1);
       });
       player.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal && id === generation && mode === 'stream') fallback();
+        if (data.fatal && id === generation) fallback();
       });
-      player.loadSource(stream);
+      player.loadSource(media.url);
       player.attachMedia(video);
     } catch {
       if (id === generation) fallback();
@@ -303,28 +261,27 @@ function directVideoCard(item, original, media) {
   }
 
   function prepare() {
-    play.hidden = true;
     video.controls = true;
     if (prefetched) {
       prefetched = false;
       if (video.error) loadDirect();
       return;
     }
-    if (mode) return loading;
+    if (attached) return loading;
     if (direct) {
       loadDirect();
       return;
     }
-    mode = 'stream';
+    attached = true;
     loading = loadStream(generation);
     return loading;
   }
 
   function release() {
-    if (!mode) return;
+    if (!attached) return;
     if (video.currentTime > 0) resumeAt = video.ended ? 0 : video.currentTime;
     generation++;
-    mode = null;
+    attached = false;
     prefetched = false;
     loading = null;
     player?.destroy();
@@ -372,9 +329,7 @@ function card(item) {
   const url = safeURL(item.url);
   if (item.player_url && url) {
     const media = item.media?.find(attachment => attachment.type === 'video');
-    return media && !(playback === 'adaptive' && item.native_stream_url)
-      ? directVideoCard(item, url, media)
-      : substackVideoCard(item, url, media);
+    return media ? directVideoCard(item, url, media) : linkedVideoCard(item, url);
   }
   const article = element('article',url ? 'card card--link' : 'card');
   if (item.source) article.classList.add('card--source');
@@ -428,10 +383,8 @@ function render() {
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
   for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
   scrollingVideos.clear();
-  closeSubstackVideo = null;
   $('items').replaceChildren(...items.map(card));
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
-  $('video-playback-setting').hidden = !items.some(item => item.player_url && item.native_stream_url);
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;
   $('message').replaceChildren();
@@ -456,11 +409,5 @@ async function load(reset = false) {
 let searchTimer;
 $('search').addEventListener('input',event=>{state.query=event.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>void load(true),180);});
 $('clear').addEventListener('click',()=>{state.category='all';state.tag='';state.query='';$('search').value='';void load(true);});
-$('video-playback').value = playback;
-$('video-playback').addEventListener('change', event => {
-  playback = event.target.value;
-  try { localStorage.setItem('paperclip-video-playback', playback); } catch { /* storage is optional */ }
-  render();
-});
 $('more').addEventListener('click',()=>void load());
 void load();

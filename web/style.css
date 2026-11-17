@@ -22,11 +22,6 @@
 .substack-preview summary:focus-visible{outline:2px solid var(--green);outline-offset:3px}
 .substack-preview iframe{display:block;width:100%;border:0;margin-top:6px}
 
-.substack-video-card{min-width:0;border-radius:7px;overflow:hidden}
-.substack-video-card iframe{display:block;width:100%;border:0}
-.substack-video-card iframe:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
-.substack-video-fallback{display:inline-block;margin:10px 0;color:var(--green);font-size:13px;text-decoration:underline}
-
 .paperclip-video-card{min-height:0}
 .video-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px 10px 16px}
 .paperclip-video-card h2{margin:0;font-size:18px;line-height:1.35}
@@ -35,12 +30,10 @@
 .paperclip-video-card video{display:block;width:100%;max-height:65svh;aspect-ratio:16/9;object-fit:contain;background:#171c18}
 .paperclip-video-card video.portrait{width:min(100%,36.5625svh);aspect-ratio:9/16;margin-inline:auto}
 .video-stage{position:relative}
-.video-embed-stage{width:100%;max-height:65svh;aspect-ratio:16/9;background:#171c18}
-.video-embed-stage.portrait{width:min(100%,36.5625svh);aspect-ratio:9/16;margin-inline:auto}
+.video-link-stage{width:100%;max-height:65svh;aspect-ratio:16/9;background:#171c18}
+.video-link-stage.portrait{width:min(100%,36.5625svh);aspect-ratio:9/16;margin-inline:auto}
 .video-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
 .video-start{position:absolute;inset:50% auto auto 50%;transform:translate(-50%,-50%);width:48px;height:48px;border:0;border-radius:50%;background:#fbfaf6;color:var(--green);line-height:1}
-.video-embed-start{padding:18px;border:0;background:none;color:var(--green);text-align:left;overflow-wrap:anywhere}
-.video-embed-start:focus-visible{outline-offset:-5px}
+.video-source{display:grid;place-items:center}
 .video-sound{flex-shrink:0;min-width:44px;min-height:44px;display:grid;place-items:center;font-size:16px;line-height:1;border:0;border-radius:8px;background:transparent;color:var(--green)}
 .video-sound:hover,.video-sound:focus-visible{background:#eef0e7}
-.collection-meta select{font:inherit;margin-inline-start:4px;padding:4px;color:var(--green);background:transparent;border:1px solid var(--line);border-radius:4px}

@@ -94,13 +94,13 @@ export function createVideoFeed(view) {
 
   function pickWarm() {
     if (view.document.hidden || connection?.saveData ||
-        ['slow-2g', '2g'].includes(connection?.effectiveType) ||
-        (active && active.readyState < 3)) return null;
+        ['slow-2g', '2g'].includes(connection?.effectiveType)) return null;
+    const canStart = !active || active.readyState >= 3;
     const height = view.innerHeight;
-    let nearest = Math.min(320, height / 2);
+    let nearest = Math.min(480, height * 0.6);
     let candidate = null;
     for (const [video, {warm}] of players) {
-      if (!warm || video === active) continue;
+      if (!warm || video === active || (!canStart && video !== warming)) continue;
       const rect = video.getBoundingClientRect();
       const distance = direction > 0 ? rect.top - height : -rect.bottom;
       if (!rect.height || distance < -height / 2 || distance > nearest) continue;

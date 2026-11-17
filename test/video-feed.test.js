@@ -151,6 +151,10 @@ test('mobile warms one nearby clip after playback is ready and reuses it when sc
   move([]);
   assert.deepEqual(warm, [next]);
   assert.equal(next.video.paused, true);
+  current.video.readyState = 2;
+  current.video.dispatchEvent(new Event('waiting'));
+  move([]);
+  assert.deepEqual(releases, [], 'a stall keeps the next clip attached');
 
   view.scrollY = 280;
   move([[current.video,-270],[next.video,430],[later.video,950]]);
