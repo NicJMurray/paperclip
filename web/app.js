@@ -1,6 +1,11 @@
 import { createVideoFeed } from './video-feed.js';
 
 const state = { items: [], categories: [], category: 'all', tag: '', query: '', cursor: null, busy: false, failed: false, serial: 0 };
+let playback = matchMedia('(hover: none) and (pointer: coarse)').matches ? 'inline' : 'adaptive';
+try {
+  const preference = localStorage.getItem('paperclip-video-playback');
+  if (preference === 'adaptive' || preference === 'inline') playback = preference;
+} catch { /* playback still works when storage is disabled */ }
 const $ = id => document.getElementById(id);
 const label = value => value.charAt(0).toUpperCase() + value.slice(1);
 const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text) node.textContent = text; return node; };
@@ -113,6 +118,7 @@ const scrollingVideos = createVideoFeed(window);
 new ResizeObserver(scrollingVideos.update).observe($('items'));
 
 const substackFrames = new WeakMap();
+let closeSubstackVideo;
 window.addEventListener('message', event => {
   const player = substackFrames.get(event.source);
   if (!player || event.origin !== player.origin) return;
@@ -136,51 +142,76 @@ function playerFrame(src, title) {
   return frame;
 }
 
-function substackVideoCard(item, original) {
+function videoHeading(title, original) {
+  const heading = element('div', 'video-heading');
+  if (title) {
+    const h2 = element('h2');
+    h2.append(sourceLink(original, title));
+    heading.append(h2);
+  }
+  return heading;
+}
+
+function videoPoster(url) {
+  if (!url) return null;
+  const image = element('img', 'video-poster');
+  image.alt = '';
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  image.src = url;
+  image.addEventListener('error', () => image.remove(), { once: true });
+  return image;
+}
+
+function substackVideoCard(item, original, media) {
   const card = element('article', 'card paperclip-video-card substack-video-card');
   const title = item.title || item.summary?.split(/\n\s*\n/)[0]?.trim();
-  const play = element('button', 'video-embed-start', title ? '▶ ' + title : '▶ Play video');
+  const play = media
+    ? element('button', 'video-start', '▶')
+    : element('button', 'video-embed-start', title ? '▶ ' + title : '▶ Play video');
   play.type = 'button';
+  play.setAttribute('aria-label', title ? 'Open adaptive player for ' + title : 'Open adaptive player');
+  let preview = [play];
+  if (media) {
+    const stage = element('div', media.portrait ? 'video-stage video-embed-stage portrait' : 'video-stage video-embed-stage');
+    const poster = videoPoster(media.poster);
+    if (poster) stage.append(poster);
+    stage.append(play);
+    preview = [videoHeading(title, original), stage];
+  }
+  card.append(...preview);
   play.addEventListener('click', () => {
+    closeSubstackVideo?.();
     const frame = playerFrame(item.player_url, title || 'Substack video');
     frame.height = 520;
     const fallback = sourceLink(original, 'Open on Substack', 'substack-video-fallback');
     fallback.hidden = true;
     card.replaceChildren(frame, fallback);
     substackFrames.set(frame.contentWindow, {frame, origin: new URL(frame.src).origin, fallback});
+    closeSubstackVideo = () => {
+      substackFrames.delete(frame.contentWindow);
+      card.replaceChildren(...preview);
+    };
     setTimeout(() => {
       if (frame.isConnected && !frame.dataset.sized) fallback.hidden = false;
     }, 8000);
     frame.focus();
-  }, { once: true });
-  card.append(play);
+  });
   return card;
 }
 
 function directVideoCard(item, original, media) {
   const card = element('article', 'card paperclip-video-card');
-  const heading = element('div', 'video-heading');
   const title = item.title || item.summary?.split(/\n\s*\n/)[0]?.trim();
-  if (title) {
-    const h2 = element('h2');
-    h2.append(sourceLink(original, title));
-    heading.append(h2);
-  }
+  const heading = videoHeading(title, original);
   const sound = element('button', 'video-sound', '🔇');
   sound.type = 'button';
   heading.append(sound);
 
   const stage = element('div', 'video-stage');
   const video = element('video', media.portrait ? 'portrait' : '');
-  const poster = media.poster ? element('img', 'video-poster') : null;
-  if (poster) {
-    poster.alt = '';
-    poster.loading = 'lazy';
-    poster.decoding = 'async';
-    poster.src = media.poster;
-    poster.addEventListener('error', () => poster.remove(), { once: true });
-    video.addEventListener('playing', () => { poster.hidden = true; });
-  }
+  const poster = videoPoster(media.poster);
+  if (poster) video.addEventListener('playing', () => { poster.hidden = true; });
   const play = element('button', 'video-start', '▶');
   play.type = 'button';
   play.setAttribute('aria-label', title ? 'Play ' + title : 'Play video');
@@ -244,7 +275,7 @@ function directVideoCard(item, original, media) {
       return;
     }
     scrollingVideos.forget(video);
-    card.replaceWith(substackVideoCard(item, original));
+    card.replaceWith(substackVideoCard(item, original, media));
   }
 
   async function loadStream(id) {
@@ -257,7 +288,7 @@ function directVideoCard(item, original, media) {
         maxBufferLength: 8, maxMaxBufferLength: 12, backBufferLength: 5,
       });
       player.on(Hls.Events.MANIFEST_PARSED, () => {
-        const cap = player.levels.findLastIndex(level => Math.min(level.width, level.height) <= 360);
+        const cap = player.levels.findLastIndex(level => Math.min(level.width, level.height) <= 720);
         player.autoLevelCapping = Math.max(0, cap);
         player.startLoad(resumeAt || -1);
       });
@@ -341,7 +372,9 @@ function card(item) {
   const url = safeURL(item.url);
   if (item.player_url && url) {
     const media = item.media?.find(attachment => attachment.type === 'video');
-    return media ? directVideoCard(item, url, media) : substackVideoCard(item, url);
+    return media && !(playback === 'adaptive' && item.native_stream_url)
+      ? directVideoCard(item, url, media)
+      : substackVideoCard(item, url, media);
   }
   const article = element('article',url ? 'card card--link' : 'card');
   if (item.source) article.classList.add('card--source');
@@ -395,8 +428,10 @@ function render() {
   const items = state.items.filter(x=>(state.category === 'all' || x.category === state.category) && (!state.tag || x.tags?.includes(state.tag)) && words.every(word=>[x.title,x.summary,x.url,...(x.tags || [])].join(' ').toLowerCase().includes(word)));
   for (const video of $('items').querySelectorAll('video')) video.dispatchEvent(new Event('paperclip-remove'));
   scrollingVideos.clear();
+  closeSubstackVideo = null;
   $('items').replaceChildren(...items.map(card));
   $('count').textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}${state.tag ? ` tagged #${state.tag}` : ''}${state.cursor ? ' loaded' : ''}`;
+  $('video-playback-setting').hidden = !items.some(item => item.player_url && item.native_stream_url);
   $('clear').hidden = !(state.query || state.tag || state.category !== 'all');
   $('message').hidden = items.length > 0;
   $('message').replaceChildren();
@@ -421,5 +456,11 @@ async function load(reset = false) {
 let searchTimer;
 $('search').addEventListener('input',event=>{state.query=event.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>void load(true),180);});
 $('clear').addEventListener('click',()=>{state.category='all';state.tag='';state.query='';$('search').value='';void load(true);});
+$('video-playback').value = playback;
+$('video-playback').addEventListener('change', event => {
+  playback = event.target.value;
+  try { localStorage.setItem('paperclip-video-playback', playback); } catch { /* storage is optional */ }
+  render();
+});
 $('more').addEventListener('click',()=>void load());
 void load();
