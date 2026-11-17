@@ -35,6 +35,13 @@ async function responseText(response, limit) {
 function publicVideo(upload, host = 'substack.com', poster = null) {
   if (upload?.state !== 'transcoded' || upload.copyright_infringement ||
       !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(upload.id ?? '')) return [];
+  if (!poster && upload.post_id == null &&
+      Number.isSafeInteger(upload.user_id) && upload.user_id > 0 &&
+      Number.isSafeInteger(upload.thumbnail_id) && upload.thumbnail_id > 0) {
+    const frame = String(upload.thumbnail_id).padStart(5, '0');
+    poster = 'https://substack-video.s3.amazonaws.com/video_upload/user/' +
+      upload.user_id + '/' + upload.id + '/transcoded-' + frame + '.png';
+  }
   return [{
     type: 'video',
     url: 'https://' + host + '/api/v1/video/upload/' + upload.id + '/src?type=mp4',

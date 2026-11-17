@@ -13,7 +13,7 @@ const profile = hasLikes => new Response(
 const note = {
   type:'comment', context:{type:'note_like', timestamp:like},
   comment:{type:'feed', post_id:null, id:456, handle:'creator', body:'The original Note.', date,
-    attachments:[{type:'video', mediaUpload:{id:'9f39f7eb-d650-4e58-b7ad-c22d44b87d55', state:'transcoded', media_type:'video', width:1080,height:1920}}]},
+    attachments:[{type:'video', mediaUpload:{id:'9f39f7eb-d650-4e58-b7ad-c22d44b87d55', state:'transcoded', media_type:'video', width:1080,height:1920,user_id:321,thumbnail_id:198}}]},
 };
 const post = {
   type:'post', context:{type:'post_like'},
@@ -40,6 +40,8 @@ test('public likes follow Substack cursors and preserve original media', async (
   assert.equal(normalized[0].media[0].url, 'https://substack.com/api/v1/video/upload/9f39f7eb-d650-4e58-b7ad-c22d44b87d55/src?type=mp4');
   assert.equal(normalized[0].media[0].portrait, true);
   assert.equal(normalized[0].media[0].format, null);
+  assert.equal(normalized[0].media[0].poster,
+    'https://substack-video.s3.amazonaws.com/video_upload/user/321/9f39f7eb-d650-4e58-b7ad-c22d44b87d55/transcoded-00198.png');
   assert.equal(normalized[1].title, post.post.title);
 });
 

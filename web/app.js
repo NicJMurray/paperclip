@@ -156,6 +156,15 @@ function directVideoCard(item, original, media) {
 
   const stage = element('div', 'video-stage');
   const video = element('video', media.portrait ? 'portrait' : '');
+  const poster = media.poster ? element('img', 'video-poster') : null;
+  if (poster) {
+    poster.alt = '';
+    poster.loading = 'lazy';
+    poster.decoding = 'async';
+    poster.src = media.poster;
+    poster.addEventListener('error', () => poster.remove(), { once: true });
+    video.addEventListener('playing', () => { poster.hidden = true; });
+  }
   const play = element('button', 'video-start', '▶');
   play.type = 'button';
   play.setAttribute('aria-label', title ? 'Play ' + title : 'Play video');
@@ -168,7 +177,6 @@ function directVideoCard(item, original, media) {
   video.muted = true;
   video.preload = 'none';
   video.setAttribute('aria-label', title || 'Substack video');
-  if (media.poster) video.poster = media.poster;
   const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
   // The Substack upload URL works in a native player, while Hls.js needs a cross-origin manifest.
   const stream = media.format === 'hls' ? media.url : nativeHls ? item.native_stream_url : null;
@@ -210,7 +218,7 @@ function directVideoCard(item, original, media) {
         maxBufferLength: 8, maxMaxBufferLength: 12, backBufferLength: 5,
       });
       player.on(Hls.Events.MANIFEST_PARSED, () => {
-        const cap = player.levels.findLastIndex(level => Math.min(level.width, level.height) <= 480);
+        const cap = player.levels.findLastIndex(level => Math.min(level.width, level.height) <= 360);
         player.autoLevelCapping = Math.max(0, cap);
         player.startLoad(resumeAt || -1);
       });
@@ -254,10 +262,13 @@ function directVideoCard(item, original, media) {
     video.load();
     video.controls = false;
     play.hidden = false;
+    if (poster) poster.hidden = false;
   }
 
   video.addEventListener('error', () => { if (!player) fallback(); });
-  stage.append(video, play);
+  stage.append(video);
+  if (poster) stage.append(poster);
+  stage.append(play);
   card.append(heading, stage);
   scrollingVideos.track(video, sound, {prepare, release});
   return card;
