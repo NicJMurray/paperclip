@@ -40,13 +40,11 @@ Generate a new pairing code to reconnect. The phone retains failed uploads and c
 
 Android keeps removal markers separately from its outbox files, so an upload finishing concurrently cannot erase a removal request. WorkManager retries removal when connected. Server queue data is kept in memory while the app is open and refreshed only in the foreground. The public website cannot list or modify the private queue.
 
-## Weekly ChatGPT task
+## Android inbox curation
 
-The task is **Sort Paperclip collection**, scheduled weekly on Sunday, using the owner’s connected Cloudflare tools. Its prompt contains the exact account/database IDs and the publication rules in CURATION.md. It reads pending rows from D1, examines links and image previews where possible, and uses parameterised updates to publish or hold each item. The public API selects `status = 'published'` and never exposes `shared_text`, `shared_title`, `image_preview`, devices or pairing codes. Categories/tags are stored in each item; no static export or deployment is needed.
+The private `paperclip-inbox-curator` Worker runs Mondays, Wednesdays, Fridays and Sundays at 06:25 UTC. It reads up to 12 pending Android captures and publishes supported public links with the source headline and description. It follows only recognized public URLs on the supported source list. Links requiring review, duplicates, standalone text and images stay private as held. Temporary source failures stay pending for the next run. Existing held items require review.
 
-The task writes an audit row to `curation_runs`. Check that table to confirm a run actually happened; creating a schedule is not proof of future completion. Connected-tool authorisation must remain valid. Inspect failures in ChatGPT and re-run after restoring access. Do not silently substitute API billing or enable another scheduler.
-
-To unpublish immediately, set the item’s status to `held`; the API and media responses use `Cache-Control: no-store`. Already downloaded public content cannot be recalled. `image_chunks` references `items` with `ON DELETE CASCADE`.
+The Worker records its counts in `curation_runs` and exposes no public route. Deploy with `npx wrangler deploy --config wrangler.inbox.jsonc`. It uses the existing D1 database and does not require a separate API account or AI service.
 
 ## Publishing and verifying code
 

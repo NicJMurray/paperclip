@@ -25,12 +25,12 @@ Android controls the share-sheet order. Long-press Paperclip and choose **Pin** 
 - Original supported-image bytes are kept, including any embedded metadata. Do not share private images or location metadata you do not intend to make public.
 - Text is limited to 32,000 characters. Videos, audio and arbitrary files are outside this first version.
 
-The incoming inbox is private. A scheduled ChatGPT task classifies new items into articles, tools, memes, images, videos (links), reference, notes or other, preserves source headlines and publisher descriptions, adds categories and tags, then publishes them. Link cards use small thumbnails; standalone images retain the larger image view. The website reads published records directly, so weekly sorting needs no redeployment. Uncertain or apparently private material is held for review. This is a best-effort safeguard, not a guarantee: share only material you are comfortable publishing.
+The incoming inbox is private. A scheduled Cloudflare Worker classifies supported public links, preserves source headlines and descriptions, and publishes them with categories and tags. Standalone text and images are held for review. Link cards use small thumbnails; standalone images retain the larger image view. The website reads published records directly, so sorting needs no redeployment. Uncertain or apparently private material is held for review. This is a best-effort safeguard, not a guarantee: share only material you are comfortable publishing.
 
 ## Small by design
 
 - Native Java, Android platform views, AndroidX WorkManager. No WebView, advertising, analytics, clipboard monitoring or broad photo-library permission.
-- Cloudflare Pages’ Worker runtime with a D1 SQLite database. No separate OpenAI API account or usage charges: sorting uses the connected ChatGPT task.
+- Cloudflare Pages’ Worker runtime with a D1 SQLite database. No separate OpenAI API account or usage charges: sorting runs on the Cloudflare Worker.
 - Images live as bounded database chunks, atomically with their metadata. R2 is not enabled on this account; D1 keeps this small personal archive in one service. If image volume grows, move the `image_chunks` table to object storage without changing the phone’s API.
 - Device tokens are hashed on the server and encrypted with Android Keystore on the phone. Pairing is single-use, high-entropy and expiring. A revoked phone cannot upload.
 - UUIDs provide retry idempotency. Sharing the same URL deliberately twice creates two records; retrying the same upload does not.
