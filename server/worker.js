@@ -224,6 +224,11 @@ async function substackEmbed(request, id, env) {
 
   const source = new URL(link.url);
   const destination = substackPlayerURL(link, new URL(request.url).origin);
+  // Substack redirects this publication's embeds to its custom domain.
+  if (destination.hostname === 'chrislakin.substack.com') {
+    destination.hostname = 'chrislakin.blog';
+    source.hostname = destination.hostname;
+  }
 
   const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
   const policy = [

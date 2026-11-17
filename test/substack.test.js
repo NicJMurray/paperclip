@@ -105,10 +105,12 @@ test('Substack refresh is idempotent and mixes with saved cards without exposing
 
 test('shared Substack URLs expose official previews only after curation publishes them', async () => {
   const noteId = randomUUID(), postId = randomUUID(), pendingId = randomUUID(), heldId = randomUUID(), otherId = randomUUID();
+  const customDomainId = randomUUID();
   const capture = (id, url, status) => db.prepare("INSERT INTO items(id,kind,status,url) VALUES (?,'link',?,?)").bind(id, status, url);
   await db.batch([
     capture(noteId, noteURL + '?utm_source=share', 'published'),
     capture(postId, 'https://open.substack.com/pub/author/p/article?r=privacy#comments', 'published'),
+    capture(customDomainId, 'https://open.substack.com/pub/chrislakin/p/article', 'published'),
     capture(pendingId, noteURL, 'pending'),
     capture(heldId, noteURL, 'held'),
     capture(otherId, 'https://notsubstack.com/p/article', 'published'),
@@ -119,12 +121,14 @@ test('shared Substack URLs expose official previews only after curation publishe
   const urls = Object.fromEntries(list.items.map(item => [item.id, item.embed_url]));
   assert.equal(urls[noteId], path(noteId));
   assert.equal(urls[postId], path(postId));
+  assert.equal(urls[customDomainId], path(customDomainId));
   assert.equal(urls[otherId], undefined);
   assert.ok(!list.items.some(item => [pendingId, heldId].includes(item.id)));
 
   for (const [id, embed, url] of [
     [noteId, 'https://substack.com/embed/c/1234', noteURL],
     [postId, 'https://author.substack.com/embed/p/article', postURL],
+    [customDomainId, 'https://chrislakin.blog/embed/p/article', 'https://chrislakin.blog/p/article'],
   ]) {
     const response = await call(path(id));
     assert.equal(response.status, 200);
