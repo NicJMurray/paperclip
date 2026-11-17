@@ -6,6 +6,8 @@ function fixture(autoplay = true) {
   const view = new EventTarget();
   view.innerHeight = 800;
   view.innerWidth = 400;
+  view.scrollY = 0;
+  view.navigator = {connection: new EventTarget()};
   view.document = new EventTarget();
   view.document.hidden = false;
   const pointer = new EventTarget();
@@ -29,6 +31,7 @@ function player() {
   video.top = 1000;
   video.volume = 1;
   video.paused = true;
+  video.readyState = 0;
   video.allowSound = true;
   let muted = true;
   Object.defineProperty(video, 'muted', {
@@ -131,5 +134,47 @@ test('desktop waits for an explicit play and mobile stops loading the clip it le
     assert.deepEqual(releases, [first]);
     assert.equal(first.video.paused, true);
     assert.equal(second.video.paused, false);
+  }
+});
+
+test('mobile warms one nearby clip after playback is ready and reuses it when scrolling', () => {
+  const {view, feed, move} = fixture();
+  const current = player(), next = player(), later = player();
+  const warm = [], releases = [];
+  for (const p of [current, next, later]) {
+    feed.track(p.video, p.button, {warm: () => warm.push(p), release: () => releases.push(p)});
+  }
+  move([[current.video,175],[next.video,850],[later.video,1050]]);
+  assert.deepEqual(warm, []);
+  current.video.readyState = 3;
+  current.video.dispatchEvent(new Event('canplay'));
+  move([]);
+  assert.deepEqual(warm, [next]);
+  assert.equal(next.video.paused, true);
+
+  view.scrollY = 280;
+  move([[current.video,-270],[next.video,430],[later.video,950]]);
+  assert.equal(next.video.paused, false);
+  assert.deepEqual(releases, [current], 'keeps the preloaded source attached');
+  assert.deepEqual(warm, [next], 'does not fetch the next card until playback is ready');
+
+  next.video.readyState = 3;
+  move([]);
+  assert.deepEqual(warm, [next, later]);
+  view.navigator.connection.saveData = true;
+  view.navigator.connection.dispatchEvent(new Event('change'));
+  move([]);
+  assert.deepEqual(releases, [current, later]);
+  assert.equal(next.video.paused, false);
+});
+
+test('speculative media stays off on desktop and slow connections', () => {
+  for (const [autoplay, effectiveType] of [[false, '4g'], [true, '2g']]) {
+    const {view, feed, move} = fixture(autoplay);
+    view.navigator.connection.effectiveType = effectiveType;
+    const next = player();
+    feed.track(next.video, next.button, {warm: () => assert.fail('unexpected preload')});
+    move([[next.video,850]]);
+    assert.equal(next.video.paused, true);
   }
 });

@@ -1,10 +1,14 @@
 export function createVideoFeed(view) {
   const players = new Map();
   const autoplay = view.matchMedia('(hover: none) and (pointer: coarse)');
+  const connection = view.navigator?.connection;
   let active = null;
+  let warming = null;
   let muted = true;
   let attempt = 0;
   let scheduled = false;
+  let lastScroll = view.scrollY;
+  let direction = 1;
 
   const silent = video => video.muted || video.volume === 0;
 
@@ -26,6 +30,8 @@ export function createVideoFeed(view) {
 
   function setActive(video) {
     if (active === video) return;
+    if (video && video === warming) warming = null;
+    else if (video) setWarm(null);
     const previous = active;
     active = video;
     attempt++;
@@ -36,6 +42,13 @@ export function createVideoFeed(view) {
     }
     if (video) mute(video, muted);
     updateButtons();
+  }
+
+  function setWarm(video) {
+    if (video === warming) return;
+    if (warming) players.get(warming).release();
+    warming = video;
+    if (warming) players.get(warming).warm();
   }
 
   async function start(video) {
@@ -79,21 +92,43 @@ export function createVideoFeed(view) {
     return closest;
   }
 
+  function pickWarm() {
+    if (view.document.hidden || connection?.saveData ||
+        ['slow-2g', '2g'].includes(connection?.effectiveType) ||
+        (active && active.readyState < 3)) return null;
+    const height = view.innerHeight;
+    let nearest = Math.min(320, height / 2);
+    let candidate = null;
+    for (const [video, {warm}] of players) {
+      if (!warm || video === active) continue;
+      const rect = video.getBoundingClientRect();
+      const distance = direction > 0 ? rect.top - height : -rect.bottom;
+      if (!rect.height || distance < -height / 2 || distance > nearest) continue;
+      nearest = distance;
+      candidate = video;
+    }
+    return candidate;
+  }
+
   function update() {
     if (scheduled) return;
     scheduled = true;
     view.requestAnimationFrame(() => {
       scheduled = false;
       if (!autoplay.matches) return;
+      if (view.scrollY !== lastScroll) direction = view.scrollY < lastScroll ? -1 : 1;
+      lastScroll = view.scrollY;
       const video = pickVisible();
-      if (video === active) return;
-      setActive(video);
-      if (video) void start(video);
+      if (video !== active) {
+        setActive(video);
+        if (video) void start(video);
+      }
+      setWarm(pickWarm());
     });
   }
 
-  function track(video, button, {prepare = () => {}, release = () => {}} = {}) {
-    const player = {button, prepare, release, expectedMute: silent(video)};
+  function track(video, button, {prepare = () => {}, release = () => {}, warm} = {}) {
+    const player = {button, prepare, release, warm, expectedMute: silent(video)};
     players.set(video, player);
     button.setAttribute('aria-label', 'Video sound');
     button.addEventListener('click', () => {
@@ -116,29 +151,41 @@ export function createVideoFeed(view) {
     video.addEventListener('play', () => {
       if (players.has(video) && !video.paused) setActive(video);
     });
+    for (const event of ['canplay', 'waiting']) {
+      video.addEventListener(event, () => { if (active === video) update(); });
+    }
     updateButtons();
     update();
   }
 
   function forget(video) {
     if (video === active) setActive(null);
+    if (video === warming) setWarm(null);
     players.delete(video);
     update();
   }
 
   function clear() {
+    setWarm(null);
     setActive(null);
     players.clear();
   }
 
   view.addEventListener('scroll', update, {passive: true});
   view.addEventListener('resize', update);
+  connection?.addEventListener('change', update);
   autoplay.addEventListener('change', () => {
     if (autoplay.matches) update();
-    else setActive(null);
+    else {
+      setWarm(null);
+      setActive(null);
+    }
   });
   view.document.addEventListener('visibilitychange', () => {
-    if (view.document.hidden) setActive(null);
+    if (view.document.hidden) {
+      setWarm(null);
+      setActive(null);
+    }
     else update();
   });
   return {track, play, forget, clear, update};

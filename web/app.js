@@ -26,6 +26,22 @@ function sourceLink(url, text, className = '') {
   return link;
 }
 
+const videoOrigins = new Set();
+function warmVideoConnections(url) {
+  const source = safeURL(url);
+  if (!source) return;
+  const origins = [source.origin];
+  if (source.pathname.startsWith('/api/v1/video/upload/')) origins.push('https://stream.mux.com');
+  for (const origin of origins) {
+    if (videoOrigins.has(origin)) continue;
+    videoOrigins.add(origin);
+    const link = element('link');
+    link.rel = 'preconnect';
+    link.href = origin;
+    document.head.append(link);
+  }
+}
+
 function importedMedia(attachment, original, reference) {
   const url = safeURL(attachment.url);
   if (!url || url.protocol !== 'https:') return null;
@@ -181,7 +197,13 @@ function directVideoCard(item, original, media) {
   // The Substack upload URL works in a native player, while Hls.js needs a cross-origin manifest.
   const stream = media.format === 'hls' ? media.url : nativeHls ? item.native_stream_url : null;
   const mp4 = media.format === 'hls' ? null : media.url;
+  const direct = !stream || nativeHls;
+  stage.addEventListener('pointerenter', event => {
+    if (event.pointerType === 'mouse') warmVideoConnections(stream || mp4);
+  });
+  play.addEventListener('focus', () => warmVideoConnections(stream || mp4));
   let mode = null;
+  let prefetched = false;
   let player;
   let loading;
   let generation = 0;
@@ -194,6 +216,23 @@ function directVideoCard(item, original, media) {
     player = null;
     video.src = mp4;
     if (resumeAt) video.currentTime = resumeAt;
+  }
+
+  function loadDirect() {
+    if (!stream) {
+      playMP4();
+      return;
+    }
+    mode = 'stream';
+    video.src = stream;
+    if (resumeAt) video.currentTime = resumeAt;
+  }
+
+  function warm() {
+    if (mode) return;
+    prefetched = true;
+    video.preload = 'metadata';
+    loadDirect();
   }
 
   function fallback() {
@@ -233,19 +272,19 @@ function directVideoCard(item, original, media) {
   }
 
   function prepare() {
-    if (mode) return loading;
     play.hidden = true;
     video.controls = true;
-    if (!stream) {
-      playMP4();
+    if (prefetched) {
+      prefetched = false;
+      if (video.error) loadDirect();
+      return;
+    }
+    if (mode) return loading;
+    if (direct) {
+      loadDirect();
       return;
     }
     mode = 'stream';
-    if (nativeHls) {
-      video.src = stream;
-      if (resumeAt) video.currentTime = resumeAt;
-      return;
-    }
     loading = loadStream(generation);
     return loading;
   }
@@ -255,22 +294,24 @@ function directVideoCard(item, original, media) {
     if (video.currentTime > 0) resumeAt = video.ended ? 0 : video.currentTime;
     generation++;
     mode = null;
+    prefetched = false;
     loading = null;
     player?.destroy();
     player = null;
     video.removeAttribute('src');
+    video.preload = 'none';
     video.load();
     video.controls = false;
     play.hidden = false;
     if (poster) poster.hidden = false;
   }
 
-  video.addEventListener('error', () => { if (!player) fallback(); });
+  video.addEventListener('error', () => { if (!player && !prefetched) fallback(); });
   stage.append(video);
   if (poster) stage.append(poster);
   stage.append(play);
   card.append(heading, stage);
-  scrollingVideos.track(video, sound, {prepare, release});
+  scrollingVideos.track(video, sound, {prepare, release, warm: direct ? warm : undefined});
   return card;
 }
 
