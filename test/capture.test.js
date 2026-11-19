@@ -2,11 +2,20 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { Miniflare, FormData, convertV4MiniflareOptions } from 'miniflare';
+import { Miniflare, FormData, Request, convertV4MiniflareOptions } from 'miniflare';
 
 let mf, db, token;
 const sha = s => createHash('sha256').update(s).digest('hex');
-const call = (path, options) => mf.dispatchFetch('https://paperclip.test'+path,options);
+const call = async (path, options) => {
+  const request = new Request('https://paperclip.test' + path, options);
+  // Finish serializing multipart bodies before an early authentication response
+  // can close Miniflare's local request stream.
+  return mf.dispatchFetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body ? await request.arrayBuffer() : undefined,
+  });
+};
 before(async()=>{
   mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: new URL('../dist/_worker.js',import.meta.url).pathname, compatibilityDate:'2026-10-30', compatibilityFlags:['nodejs_compat'], d1Databases:{DB:'paperclip-test'} }));
   db = await mf.getD1Database('DB');
