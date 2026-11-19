@@ -1,6 +1,6 @@
 # Paperclip curation
 
-The scheduled Cloudflare inbox curator handles supported public links automatically. Use the steps below for manual review of held items. The automated Worker preserves held records and does not inspect standalone images or text.
+The scheduled Cloudflare inbox curator handles supported public links automatically, including links shared with a preview image. Use the steps below for manual review of held items. The automated Worker preserves held records and does not inspect standalone images or text.
 
 The owner has authorised automatically publishing the organised collection at https://paperclip.njmurray.com. Capture must remain frictionless: never ask for categories or tags while sharing.
 

@@ -14,6 +14,7 @@ const categories = [
   [/^arxiv\.org$/, /^\/abs\/[\w./-]+$/, 'reference', ['arxiv','research']],
   [/^hackerbooks\.org$/, /^\/$/, 'tools', ['books','software']],
   [/^karpathy\.bearblog\.dev$/, /^\/[\w-]+\/?$/, 'articles', ['blog','article']],
+  [/^(?:www\.)?talkie-lm\.com$/, /^\/(?:chat\/?)?$/, 'tools', ['ai','language-models']],
 ];
 const privateText = /\b(?:do not (?:share|publish)|don['’]t (?:share|publish)|private link|magic link|one.time (?:code|password)|reset (?:your )?password|api key|access token|invitation code)\b/i;
 const unavailable = /^(?:access denied|just a moment|page not found|attention required|forbidden|request blocked|verify you are human|sign in|log in|subscribe)(?:$|[\s:|!–—-])/i;
@@ -71,7 +72,9 @@ async function metadata(response) {
 
 export async function curate(item, fetchPage = fetch) {
   if (privateText.test([item.shared_title,item.shared_text].join(' '))) return {reason:'Possible private or sensitive content.'};
-  if (item.kind !== 'link') return {reason:'Standalone text or images need review.'};
+  if (item.kind !== 'link' && !(item.kind === 'image' && item.url)) {
+    return {reason:'Standalone text or images need review.'};
+  }
   const source = publicSource(item.url);
   if (!source) return {reason:'Source link needs review before publication.'};
   let target = source.canonical;
@@ -105,9 +108,11 @@ export async function curate(item, fetchPage = fetch) {
 }
 
 export async function sortInbox(db, fetchPage = fetch) {
-  const {results} = await db.prepare("SELECT id,kind,url,shared_title,shared_text FROM items WHERE status='pending' ORDER BY created_at,id LIMIT ?").bind(BATCH).all();
+  const {results} = await db.prepare("SELECT id,kind,url,shared_title,shared_text,EXISTS (SELECT 1 FROM image_chunks c WHERE c.item_id=items.id) AS has_image FROM items WHERE status='pending' ORDER BY created_at,id LIMIT ?").bind(BATCH).all();
   const now = new Date().toISOString();
-  const decisions = await Promise.all(results.map(item => curate(item, fetchPage)));
+  const decisions = await Promise.all(results.map(item => item.kind === 'image' && !item.has_image
+    ? {reason:'Shared preview image is missing.'}
+    : curate(item, fetchPage)));
   const duplicate = "EXISTS (SELECT 1 FROM items p WHERE p.status='published' AND (p.url=? OR substr(p.url,1,instr(p.url||'?','?')-1)=?)) OR EXISTS (SELECT 1 FROM feed_items p WHERE p.url=?)";
   const work = [];
   for (const [i, item] of results.entries()) {
