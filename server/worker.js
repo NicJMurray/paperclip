@@ -99,7 +99,17 @@ async function capture(request, env) {
   } else if (file) throw new HttpError(400, 'Invalid image.');
   const url = findURL(text);
   if (!image && !text.trim()) throw new HttpError(400, 'Nothing to save.');
-  const statements = [env.DB.prepare('INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM discarded_items WHERE id = ?)').bind(id, image ? 'image' : url ? 'link' : 'text', text, title, url, mime, image?.byteLength || 0, preview, id)];
+  const kind = image ? 'image' : url ? 'link' : 'text';
+  const category = url ? 'articles' : image ? 'images' : 'notes';
+  const headline = title.trim() || url || (image ? 'Image' : 'Note');
+  const caption = text.trim();
+  const summary = caption && caption !== headline && caption !== url ? caption : null;
+  const statements = [env.DB.prepare(`
+    INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview,
+      status, title, summary, category, published_at)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    WHERE NOT EXISTS (SELECT 1 FROM discarded_items WHERE id = ?)
+  `).bind(id, kind, text, title, url, mime, image?.byteLength || 0, preview, headline, summary, category, id)];
   // D1 has a per-value limit: bounded chunks preserve the original image, atomically.
   if (image) for (let offset = 0, part = 0; offset < image.byteLength; offset += 256 * 1024, part++) statements.push(env.DB.prepare('INSERT INTO image_chunks (item_id, part, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM items WHERE id = ?)').bind(id, part, Buffer.from(image.subarray(offset, offset + 256 * 1024)).toString('base64'), id));
   try { await env.DB.batch(statements); }

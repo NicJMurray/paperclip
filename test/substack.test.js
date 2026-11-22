@@ -105,7 +105,7 @@ test('Substack refresh is idempotent and mixes with saved cards without exposing
   assert.deepEqual(results.items.map(item => item.id), [savedID]);
 });
 
-test('shared Substack URLs expose official previews only after curation publishes them', async () => {
+test('shared Substack URLs expose official previews only for published captures', async () => {
   const noteId = randomUUID(), postId = randomUUID(), pendingId = randomUUID(), heldId = randomUUID(), otherId = randomUUID();
   const customDomainId = randomUUID();
   const capture = (id, url, status) => db.prepare("INSERT INTO items(id,kind,status,url) VALUES (?,'link',?,?)").bind(id, status, url);

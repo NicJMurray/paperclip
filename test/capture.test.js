@@ -35,22 +35,45 @@ test('pairing codes are single-use and tokens are hashed',async()=>{
   assert.equal((await call('/api/pair',{method:'POST',body:JSON.stringify({code:'a'.repeat(32)})})).status,401);
   const device=await db.prepare('SELECT token_hash FROM devices').first();assert.equal(device.token_hash,sha(token));assert.notEqual(device.token_hash,token);
 });
-test('capture is authenticated, private and idempotent',async()=>{
-  const id=randomUUID();assert.equal((await call('/api/capture',{method:'POST',body:form(id)})).status,401);
-  const saved = await send(form(id)); assert.equal(saved.status,201,await saved.text());assert.equal((await send(form(id))).status,200);
-  const row=await db.prepare('SELECT * FROM items WHERE id=?').bind(id).first();assert.equal(row.status,'pending');assert.equal(row.url,'https://example.org/a');
-  assert.equal((await (await call('/api/items')).json()).items.length,0);
+test('authenticated links publish immediately without a title or a supported source',async()=>{
+  const url='https://example.org/remark.pdf';
+  const id=randomUUID(), body=form(id,url);body.delete('title');
+  assert.equal((await call('/api/capture',{method:'POST',body})).status,401);
+  assert.equal((await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first()),null);
+  const saved = await send(body); assert.equal(saved.status,201,await saved.text());
+  assert.equal((await send(body)).status,200);
+  const row=await db.prepare('SELECT * FROM items WHERE id=?').bind(id).first();
+  assert.equal(row.status,'published');assert.equal(row.url,url);
+  assert.equal(row.title,url);assert.equal(row.summary,null);assert.ok(row.published_at);
+  const items=(await (await call('/api/items?q=remark.pdf')).json()).items;
+  assert.deepEqual(items.map(item=>item.id),[id]);
+  assert.equal(items[0].shared_text,undefined);
+  assert.equal((await privateQueue().then(r=>r.json())).total,0);
   assert.equal((await call('/media/'+id)).status,404);
-  assert.equal((await db.prepare('SELECT count(*) n FROM items WHERE id=?').bind(id).first()).n,1);
 });
-test('original images round-trip after publication; pending bytes remain private',async()=>{
-  const id=randomUUID();const image=Buffer.alloc(600000,83);Buffer.from([137,80,78,71,13,10,26,10]).copy(image);
-  assert.equal((await send(form(id,'A diagram',image))).status,201);
+test('shared notes retain their original title and text',async()=>{
+  const id=randomUUID(), text='An original note.\nA second line.';
+  const saved=await send(form(id,text));assert.equal(saved.status,201);
+  const items=(await (await call('/api/items?category=notes&q=original')).json()).items;
+  assert.deepEqual(items.map(item=>[item.id,item.title,item.summary.replaceAll('\r\n','\n')]),[[id,'A shared find',text]]);
+});
+test('original images are available as soon as the upload succeeds',async()=>{
+  const id=randomUUID();
+  const image=Buffer.alloc(600000,83);Buffer.from([137,80,78,71,13,10,26,10]).copy(image);
+  const body=form(id,'An image shared with https://example.org/diagram',image);
+  assert.equal((await send(body)).status,201);
+  assert.equal((await send(body)).status,200);
   assert.equal((await db.prepare('SELECT count(*) n FROM image_chunks WHERE item_id=?').bind(id).first()).n,3);
-  assert.equal((await call('/media/'+id)).status,404);
-  await db.prepare("UPDATE items SET status='published', title='A diagram', category='images', tags='[\"design\"]', summary='A visual note', published_at=? WHERE id=?").bind(new Date().toISOString(),id).run();
   const response=await call('/media/'+id);assert.equal(response.status,200);assert.equal(response.headers.get('Content-Type'),'image/png');assert.deepEqual(Buffer.from(await response.arrayBuffer()),image);
-  const items=(await (await call('/api/items')).json()).items;assert.equal(items.length,1);assert.deepEqual(items[0].tags,['design']);assert.equal(items[0].shared_text,undefined);
+  const items=(await (await call('/api/items?q=diagram')).json()).items;
+  assert.deepEqual(items.map(item=>[item.id,item.kind,item.url,item.image_url]),[[id,'image','https://example.org/diagram','/media/'+id]]);
+});
+test('standalone images publish without a title or a caption',async()=>{
+  const image=Buffer.from([137,80,78,71,13,10,26,10]);
+  const id=randomUUID(), body=form(id,'',image);body.delete('title');
+  assert.equal((await send(body)).status,201);
+  const items=(await (await call('/api/items?category=images')).json()).items;
+  assert.deepEqual(items.map(item=>[item.id,item.title,item.summary]),[[id,'Image',null]]);
 });
 test('rejects executable image formats and oversized text',async()=>{
   assert.equal((await send(form(randomUUID(),'x',Buffer.from('<svg onload="alert(1)"></svg>')))).status,415);
@@ -64,14 +87,14 @@ test('revoked devices cannot write',async()=>{
 test('pagination never loses records sharing a capture timestamp',async()=>{
   const date='2026-01-01T00:00:00.000Z';
   await db.batch(Array.from({length:105},()=>db.prepare("INSERT INTO items(id,created_at,kind,status,title,category) VALUES (?,?,'text','published','Example','notes')").bind(randomUUID(),date)));
-  const first=await (await call('/api/items')).json();assert.equal(first.items.length,100);assert.ok(first.next);
-  const second=await (await call('/api/items?after='+encodeURIComponent(first.next))).json();assert.equal(second.items.length,6);assert.equal(second.next,null);assert.equal(new Set([...first.items,...second.items].map(x=>x.id)).size,106);
+  const first=await (await call('/api/items?q=Example&category=notes')).json();assert.equal(first.items.length,100);assert.ok(first.next);
+  const second=await (await call('/api/items?q=Example&category=notes&after='+encodeURIComponent(first.next))).json();assert.equal(second.items.length,5);assert.equal(second.next,null);assert.equal(new Set([...first.items,...second.items].map(x=>x.id)).size,105);
 });
 test('searches and tag filters cover the full archive and exclude private rows',async()=>{
   const id=randomUUID();await db.prepare("INSERT INTO items(id,created_at,kind,status,title,summary,category,tags) VALUES (?,'2020-01-01','link','published','A rare telescope','A reference guide','reference','[\"astronomy\"]')").bind(id).run();
   const data=await (await call('/api/items?q=rare+telescope&tag=astronomy&category=reference')).json();assert.deepEqual(data.items.map(x=>x.id),[id]);assert.ok(data.categories.includes('notes'));
   assert.equal((await (await call('/api/items?q='+encodeURIComponent("' OR 1=1 --"))).json()).items.length,0);
-  assert.equal((await (await call('/api/items?q=A+shared+find')).json()).items.length,0);
+  assert.equal((await (await call('/api/items?q=example.org%2Fqueue')).json()).items.length,0);
 });
 
 const privateQueue = () => call('/api/queue',{headers:{Authorization:`Bearer ${token}`}});
@@ -83,10 +106,15 @@ test('private queue returns only the latest three unpublished items',async()=>{
   await db.batch(ids.map((id,i)=>db.prepare("INSERT INTO items(id,created_at,kind,status,shared_title,url) VALUES (?,?,'link',?,?,'https://example.org/queue')").bind(id,`2099-01-0${i+1}T00:00:00.000Z`,i===4?'held':'pending','Source title '+i)));
   const result=await (await privateQueue()).json();assert.deepEqual(result.items.map(x=>x.id),ids.slice(2).reverse());assert.equal(result.total,baseline+5);
   assert.equal(result.items[0].status,'held');assert.equal(result.items[0].title,'Source title 4');assert.equal(result.items[0].shared_text,undefined);assert.equal(result.items[0].image_preview,undefined);
+  assert.equal((await (await call('/api/items?q=example.org%2Fqueue')).json()).items.length,0);
 });
 test('removing a waiting image deletes bytes and prevents upload retries recreating it',async()=>{
   const id=randomUUID(),image=Buffer.from([137,80,78,71,13,10,26,10,0,0,0]);
-  assert.equal((await send(form(id,'',image))).status,201);
+  await db.batch([
+    db.prepare("INSERT INTO items(id,kind,status,mime_type) VALUES (?,'image','held','image/png')").bind(id),
+    db.prepare('INSERT INTO image_chunks(item_id,part,data) VALUES (?,0,?)').bind(id,image.toString('base64')),
+  ]);
+  assert.equal((await call('/media/'+id)).status,404);
   assert.equal((await call('/api/queue/'+id,{method:'DELETE'})).status,401);
   assert.ok(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first());
   assert.equal((await discard(id)).status,200);assert.equal((await discard(id)).status,200);
@@ -104,12 +132,16 @@ test('queue removal cannot delete an already published item',async()=>{
   assert.equal((await discard(id)).status,409);assert.equal((await db.prepare('SELECT status FROM items WHERE id=?').bind(id).first()).status,'published');
   assert.equal(await db.prepare('SELECT id FROM discarded_items WHERE id=?').bind(id).first(),null);
 });
-test('racing removal and capture leave no item or orphan image chunks',async()=>{
+test('racing removal and capture either discard the item or publish it with its image',async()=>{
   for(let i=0;i<4;i++){
     const id=randomUUID(),image=Buffer.from([137,80,78,71,13,10,26,10,0,0,0]);
     const [capture,removed]=await Promise.all([send(form(id,'Race test',image)),discard(id)]);
-    assert.ok([201,410].includes(capture.status),await capture.text());assert.equal(removed.status,200);
-    assert.equal(await db.prepare('SELECT id FROM items WHERE id=?').bind(id).first(),null);
-    assert.equal((await db.prepare('SELECT count(*) n FROM image_chunks WHERE item_id=?').bind(id).first()).n,0);
+    const row=await db.prepare('SELECT status FROM items WHERE id=?').bind(id).first();
+    const {n}=await db.prepare('SELECT count(*) n FROM image_chunks WHERE item_id=?').bind(id).first();
+    if (removed.status===200) {
+      assert.equal(capture.status,410);assert.equal(row,null);assert.equal(n,0);
+    } else {
+      assert.equal(removed.status,409);assert.equal(capture.status,201);assert.equal(row.status,'published');assert.equal(n,1);
+    }
   }
 });

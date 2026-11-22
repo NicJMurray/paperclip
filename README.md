@@ -10,7 +10,7 @@ A native Android share target and a public collection at **https://paperclip.njm
 
 There is no category selector, tag form, or confirmation screen. “Queued” means the phone has a durable copy; uploads run with WorkManager whenever connected. Uninstalling the app or clearing its storage removes unsent items. Open Paperclip to check the queue, check the connection or retry uploads. Keep the pairing code out of GitHub: it is a one-time credential, not the APK.
 
-The app shows the three most recent waiting items, combining uploads on this phone with the private server inbox. Rows show the URL or image name and whether they are waiting to upload, waiting to sort, or held. Tap **×** to remove a waiting item. Removal requests persist offline and sync when connected; if sorting publishes the item first, the app reports that it was already published and does not delete the public entry. The server inbox requires a connection to refresh; the app keeps the last fetched list while it stays open.
+The app shows the three most recent waiting items, including uploads still on this phone. Tap **×** to remove a waiting item. Removal requests persist offline and sync when connected. If the upload publishes first, the app reports that it was already published and preserves the public entry.
 
 Website updates appear automatically. For Android updates, install the newer APK over the existing app using the same signing key. Your connection and outbox remain in place; do not uninstall first. Version 1.1 adds the queue list and removal controls.
 
@@ -25,12 +25,12 @@ Android controls the share-sheet order. Long-press Paperclip and choose **Pin** 
 - Original supported-image bytes are kept, including any embedded metadata. Do not share private images or location metadata you do not intend to make public.
 - Text is limited to 32,000 characters. Videos, audio and arbitrary files are outside this first version.
 
-The incoming inbox is private. A scheduled Cloudflare Worker classifies supported public links, preserves source headlines and descriptions, and publishes them with categories and tags. Standalone text and images are held for review. Link cards use small thumbnails; standalone images retain the larger image view. The website reads published records directly, so sorting needs no redeployment. Uncertain or apparently private material is held for review. This is a best-effort safeguard, not a guarantee: share only material you are comfortable publishing.
+Shares appear on the public website as soon as the upload succeeds. Paperclip uses the shared title, text, URL and image. If a link has no title, Paperclip displays its URL. Link cards use small thumbnails and standalone images retain the larger image view. Share only material you intend to make public.
 
 ## Small by design
 
 - Native Java, Android platform views, AndroidX WorkManager. No WebView, advertising, analytics, clipboard monitoring or broad photo-library permission.
-- Cloudflare Pages’ Worker runtime with a D1 SQLite database. No separate OpenAI API account or usage charges: sorting runs on the Cloudflare Worker.
+- Cloudflare Pages’ Worker runtime with a D1 SQLite database. Publication is part of the upload.
 - Images live as bounded database chunks, atomically with their metadata. R2 is not enabled on this account; D1 keeps this small personal archive in one service. If image volume grows, move the `image_chunks` table to object storage without changing the phone’s API.
 - Device tokens are hashed on the server and encrypted with Android Keystore on the phone. Pairing is single-use, high-entropy and expiring. A revoked phone cannot upload.
 - UUIDs provide retry idempotency. Sharing the same URL deliberately twice creates two records; retrying the same upload does not.
@@ -57,4 +57,4 @@ cd android
 
 Android unit tests use Robolectric to check the three-row list, URL/image labels and durable removal requests. For an installable release with the same signature as the first APK, set `PAPERCLIP_KEYSTORE` and `PAPERCLIP_STORE_PASSWORD`, keep key alias `paperclip`, then run `./gradlew assembleRelease`. Increment `versionCode` for updates. The owner’s signing backup is supplied separately and must never be committed. A different signing key requires uninstalling the previous app, which also deletes its queue and connection.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure, pairing/revocation and scheduled publishing, and [CURATION.md](CURATION.md) for the task’s rules.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for infrastructure, pairing, revocation and publishing.

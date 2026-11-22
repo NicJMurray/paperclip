@@ -8,7 +8,7 @@
 - D1 database: `paperclip`, ID `1395d63b-ad48-4243-98fe-c94d94b4f937`; binding `DB`.
 - Runtime: compatibility date `2026-10-30`, flag `nodejs_compat`.
 
-Pages reuses the account’s existing GitHub authorisation. A separate Workers Builds project would need a build deployment token unavailable through the current connection. This app therefore uses Pages’ Worker runtime and Git builds, including its D1 binding. Weekly content updates are database writes, independent of code builds.
+Pages reuses the account’s existing GitHub authorisation. A separate Workers Builds project would need a build deployment token unavailable through the current connection. This app therefore uses Pages’ Worker runtime and Git builds, including its D1 binding. New shares appear through database writes, independent of code builds.
 
 `npm run build` emits an advanced-mode `_worker.js`, `_routes.json` and an HTML fallback. The Worker embeds the small CSS/JS/HTML assets, routes every request, authenticates writes, and exposes only published content. No database dump, credentials, APK signing key, device token or private inbox is a public asset. Preview builds are disabled; the live database must not be bound to untrusted preview code.
 
@@ -40,11 +40,9 @@ Generate a new pairing code to reconnect. The phone retains failed uploads and c
 
 Android keeps removal markers separately from its outbox files, so an upload finishing concurrently cannot erase a removal request. WorkManager retries removal when connected. Server queue data is kept in memory while the app is open and refreshed only in the foreground. The public website cannot list or modify the private queue.
 
-## Android inbox curation
+## Android publishing
 
-The private `paperclip-inbox-curator` Worker runs Mondays, Wednesdays, Fridays and Sundays at 06:25 UTC. It reads up to 12 pending Android captures and publishes supported public links with the source headline and description. It follows only recognized public URLs on the supported source list. Links requiring review, duplicates, standalone text and images stay private as held. Temporary source failures stay pending for the next run. Existing held items require review.
-
-The Worker records its counts in `curation_runs` and exposes no public route. Deploy with `npx wrangler deploy --config wrangler.inbox.jsonc`. It uses the existing D1 database and does not require a separate API account or AI service.
+The authenticated `POST /api/capture` endpoint publishes a share in the same database batch that stores its image chunks. It uses the title and text supplied by Android and displays the URL when a link has no title. The former `paperclip-inbox-curator` schedule is retired. The private queue endpoints still support legacy unpublished records and offline removal requests.
 
 ## Publishing and verifying code
 
