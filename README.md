@@ -12,7 +12,7 @@ There is no category selector, tag form, or confirmation screen. “Queued” me
 
 The app shows the three most recent waiting items, including uploads still on this phone. Tap **×** to remove a waiting item. Removal requests persist offline and sync when connected. If the upload publishes first, the app reports that it was already published and preserves the public entry.
 
-Website updates appear automatically. For Android updates, install the newer APK over the existing app using the same signing key. Your connection and outbox remain in place; do not uninstall first. Version 1.1 adds the queue list and removal controls.
+Website updates appear automatically. Install the signed Android update over the existing app to keep your connection and outbox. Version 1.2 adds document and mixed-file shares.
 
 For public Substack posts and Notes, use Substack's **Share → Paperclip**. If Substack only offers **Copy link**, share that link from your browser. Direct videos start when clicked on desktop and autoplay when visible on touch devices. They start muted, and the sound control carries your preference to the next video. A video that cannot play directly links to its source. Other Substack cards offer **Preview on Paperclip** and a source link. This works for recognized Substack URLs, including links copied from your Likes tab.
 
@@ -21,9 +21,9 @@ Android controls the share-sheet order. Long-press Paperclip and choose **Pin** 
 ## What it saves
 
 - Links and text, including the sender’s subject/title when available.
-- JPEG, PNG, WebP and GIF images, including multiple images per share, up to 10 MB each and 30 images per share. A small preview helps the sorting task understand images. Readable HEIC and other Android-decodable formats are converted to JPEG. Oversized or unreadable images show an error, never a false “saved” message.
-- Original supported-image bytes are kept, including any embedded metadata. Do not share private images or location metadata you do not intend to make public.
-- Text is limited to 32,000 characters. Videos, audio and arbitrary files are outside this first version.
+- Original images, documents and other files provided by Android, up to 10 MB each and 30 files per share. JPEG, PNG, WebP and GIF appear inline. Other file types use a download link.
+- Embedded file metadata is preserved. Share only material you intend to make public.
+- Text is limited to 32,000 characters.
 
 Shares appear on the public website as soon as the upload succeeds. Paperclip uses the shared title, text, URL and image. If a link has no title, Paperclip displays its URL. Link cards use small thumbnails and standalone images retain the larger image view. Share only material you intend to make public.
 
@@ -31,7 +31,7 @@ Shares appear on the public website as soon as the upload succeeds. Paperclip us
 
 - Native Java, Android platform views, AndroidX WorkManager. No WebView, advertising, analytics, clipboard monitoring or broad photo-library permission.
 - Cloudflare Pages’ Worker runtime with a D1 SQLite database. Publication is part of the upload.
-- Images live as bounded database chunks, atomically with their metadata. R2 is not enabled on this account; D1 keeps this small personal archive in one service. If image volume grows, move the `image_chunks` table to object storage without changing the phone’s API.
+- Files live as bounded database chunks, atomically with their metadata. D1 keeps this small personal archive in one service. The `image_chunks` table also stores document bytes.
 - Device tokens are hashed on the server and encrypted with Android Keystore on the phone. Pairing is single-use, high-entropy and expiring. A revoked phone cannot upload.
 - UUIDs provide retry idempotency. Sharing the same URL deliberately twice creates two records; retrying the same upload does not.
 

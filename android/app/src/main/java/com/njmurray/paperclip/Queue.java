@@ -18,7 +18,10 @@ final class Queue {
     static String label(JSONObject meta,boolean image){
         String text=meta.optString("text");java.util.regex.Matcher url=java.util.regex.Pattern.compile("https?://[^\\s<>\"']+").matcher(text);
         if(url.find())return url.group();String title=meta.optString("title").trim();
-        return !title.isEmpty()?title:image?"Image":text.trim().isEmpty()?"Text":text.trim();
+        if (!title.isEmpty()) return title;
+        String fileName = meta.optString("file_name").trim();
+        if (!fileName.isEmpty()) return fileName;
+        return image?"Image":text.trim().isEmpty()?"Text":text.trim();
     }
     static boolean cancelled(Context c,String id){return new File(removalRoot(c),id).isFile();}
     static void cancel(Context c,String id)throws IOException{

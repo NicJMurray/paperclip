@@ -2,8 +2,8 @@ import { Buffer } from 'node:buffer';
 import { assets } from './assets.js';
 import { substackFeedURL, refreshSubstack, sharedSubstackLink, substackStreamSource } from './substack.js';
 
-const MAX_IMAGE = 10 * 1024 * 1024;
-const MAX_REQUEST = MAX_IMAGE + 128 * 1024;
+const MAX_FILE = 10 * 1024 * 1024;
+const MAX_REQUEST = MAX_FILE + 256 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -36,7 +36,7 @@ function imageType(bytes) {
 }
 
 async function limitedBody(request, limit) {
-  if (Number(request.headers.get('content-length')) > limit) throw new HttpError(413, 'Image too large (maximum 10 MB).');
+  if (Number(request.headers.get('content-length')) > limit) throw new HttpError(413, 'Upload too large.');
   const reader = request.body?.getReader();
   if (!reader) return new Uint8Array();
   const parts = []; let size = 0;
@@ -85,33 +85,37 @@ async function capture(request, env) {
   const text = form.get('text') || '', title = form.get('title') || '';
   if (typeof text !== 'string' || text.length > 32000 || typeof title !== 'string' || title.length > 500) throw new HttpError(400, 'Shared text is too long.');
   const file = form.get('file');
-  let mime = null, image = null, preview = null;
+  const suppliedName = form.get('file_name');
+  if (suppliedName !== null && (typeof suppliedName !== 'string' || !file)) throw new HttpError(400, 'Invalid file name.');
+  const fileName = suppliedName?.split(/[\\/]/).at(-1).replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 255).toWellFormed() ||
+    (suppliedName === null ? null : 'Attachment');
+  let mime = null, upload = null, preview = null;
   if (file && typeof file.arrayBuffer === 'function') {
-    if (!file.size || file.size > MAX_IMAGE) throw new HttpError(413, 'Image must be between 1 byte and 10 MB.');
-    image = new Uint8Array(await file.arrayBuffer());
-    mime = imageType(image);
-    if (!mime) throw new HttpError(415, 'Supported images: JPEG, PNG, GIF and WebP.');
+    if (!file.size || file.size > MAX_FILE) throw new HttpError(413, 'File must be between 1 byte and 10 MB.');
+    upload = new Uint8Array(await file.arrayBuffer());
+    mime = imageType(upload);
+    if (!mime && !fileName) throw new HttpError(415, 'Supported images: JPEG, PNG, GIF and WebP.');
     const thumb = form.get('preview');
-    if (thumb && typeof thumb.arrayBuffer === 'function' && thumb.size <= 40000) {
+    if (mime && thumb && typeof thumb.arrayBuffer === 'function' && thumb.size <= 40000) {
       const b = new Uint8Array(await thumb.arrayBuffer());
       if (imageType(b) === 'image/jpeg') preview = Buffer.from(b).toString('base64');
     }
-  } else if (file) throw new HttpError(400, 'Invalid image.');
+  } else if (file || fileName) throw new HttpError(400, 'Invalid file.');
   const url = findURL(text);
-  if (!image && !text.trim()) throw new HttpError(400, 'Nothing to save.');
-  const kind = image ? 'image' : url ? 'link' : 'text';
-  const category = url ? 'articles' : image ? 'images' : 'notes';
-  const headline = title.trim() || url || (image ? 'Image' : 'Note');
+  if (!upload && !text.trim()) throw new HttpError(400, 'Nothing to save.');
+  const kind = mime ? 'image' : url ? 'link' : 'text';
+  const category = upload && !mime ? 'files' : url ? 'articles' : mime ? 'images' : 'notes';
+  const headline = title.trim() || fileName || url || (mime ? 'Image' : 'Note');
   const caption = text.trim();
   const summary = caption && caption !== headline && caption !== url ? caption : null;
   const statements = [env.DB.prepare(`
-    INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview,
+    INSERT INTO items (id, kind, shared_text, shared_title, url, mime_type, byte_size, image_preview, file_name,
       status, title, summary, category, published_at)
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
     WHERE NOT EXISTS (SELECT 1 FROM discarded_items WHERE id = ?)
-  `).bind(id, kind, text, title, url, mime, image?.byteLength || 0, preview, headline, summary, category, id)];
-  // D1 has a per-value limit: bounded chunks preserve the original image, atomically.
-  if (image) for (let offset = 0, part = 0; offset < image.byteLength; offset += 256 * 1024, part++) statements.push(env.DB.prepare('INSERT INTO image_chunks (item_id, part, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM items WHERE id = ?)').bind(id, part, Buffer.from(image.subarray(offset, offset + 256 * 1024)).toString('base64'), id));
+  `).bind(id, kind, text, title, url, mime, upload?.byteLength || 0, preview, fileName, headline, summary, category, id)];
+  // D1's existing chunk table stores original bytes in the same transaction as the item.
+  if (upload) for (let offset = 0, part = 0; offset < upload.byteLength; offset += 256 * 1024, part++) statements.push(env.DB.prepare('INSERT INTO image_chunks (item_id, part, data) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM items WHERE id = ?)').bind(id, part, Buffer.from(upload.subarray(offset, offset + 256 * 1024)).toString('base64'), id));
   try { await env.DB.batch(statements); }
   catch (error) {
     // Two workers may receive the same retry concurrently. The batch rolls back fully.
@@ -145,7 +149,7 @@ async function discard(request, env, id) {
 
 const externalCollection = String.raw`
   WITH saved AS (
-    SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at,
+    SELECT id, created_at, kind, url, mime_type, file_name, title, summary, category, tags, published_at,
       rtrim(substr(raw_url, 1, instr(raw_url || '#', '#') - 1), '/') AS clean_url
     FROM (
       SELECT *, substr(url, 1, instr(url || '?', '?') - 1) AS raw_url
@@ -153,10 +157,10 @@ const externalCollection = String.raw`
     )
   ),
   collection AS (
-    SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at,
+    SELECT id, created_at, kind, url, mime_type, file_name, title, summary, category, tags, published_at,
       NULL AS source, NULL AS media FROM saved
     UNION ALL
-    SELECT f.id, f.created_at, 'link', f.url, NULL, f.title, f.summary, f.category,
+    SELECT f.id, f.created_at, 'link', f.url, NULL, NULL, f.title, f.summary, f.category,
       '["substack"]', NULL, f.source, f.media
     FROM feed_items f
     WHERE f.source = 'substack' AND NOT EXISTS (
@@ -185,9 +189,9 @@ async function collection(request, env, context) {
     "(? = '' OR created_at < ? OR (created_at = ? AND id < ?))",
     "(? = '' OR category = ?)",
     "(? = '' OR EXISTS (SELECT 1 FROM json_each(collection.tags) WHERE value = ?))",
-    ...query.map(() => "instr(lower(coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(url,'') || ' ' || tags), lower(?)) > 0"),
+    ...query.map(() => "instr(lower(coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(url,'') || ' ' || coalesce(file_name,'') || ' ' || tags), lower(?)) > 0"),
   ];
-  const savedCollection = "WITH collection AS (SELECT id, created_at, kind, url, mime_type, title, summary, category, tags, published_at, NULL AS source, NULL AS media FROM items WHERE status = 'published')";
+  const savedCollection = "WITH collection AS (SELECT id, created_at, kind, url, mime_type, file_name, title, summary, category, tags, published_at, NULL AS source, NULL AS media FROM items WHERE status = 'published')";
   const collectionSQL = (feed || env.SUBSTACK_CRON_FEED === '1') ? externalCollection : savedCollection;
   const [pageResult, categories] = await env.DB.batch([
     env.DB.prepare(collectionSQL + ` SELECT * FROM collection WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT 101`).bind(after, date || '', date || '', id || '', category, category, tag, tag, ...query),
@@ -199,15 +203,17 @@ async function collection(request, env, context) {
   const { results } = pageResult;
   const page = results.slice(0, 100);
   const last = page.at(-1);
-  const items = page.map(({ source, media, ...row }) => {
+  const items = page.map(({ source, media, file_name, ...row }) => {
     const link = (!source || row.category === 'videos') && sharedSubstackLink(row.url);
     const attachments = source ? JSON.parse(media) : null;
     const video = attachments?.find(item => item.type === 'video');
     const stream = substackStreamSource(video?.url);
+    const download = file_name && row.kind !== 'image';
     return {
       ...row,
       tags: JSON.parse(row.tags),
       image_url: row.kind === 'image' ? `/media/${row.id}` : null,
+      ...(download ? {kind: 'file', file_name, file_url: `/files/${row.id}`} : {}),
       ...(source ? { source, media: attachments } : {}),
       ...(stream ? { native_stream_url: stream.href } : {}),
       ...(link ? { embed_url: `/embed/substack/${row.id}` } : {}),
@@ -290,13 +296,20 @@ new ResizeObserver(() => {
   } });
 }
 
-async function media(id, env) {
+async function media(id, env, download = false) {
   if (!UUID.test(id)) throw new HttpError(404, 'Not found.');
-  const item = await env.DB.prepare("SELECT mime_type FROM items WHERE id = ? AND status = 'published' AND kind = 'image'").bind(id).first();
+  const kind = download ? "file_name IS NOT NULL AND kind != 'image'" : "kind = 'image'";
+  const item = await env.DB.prepare(`SELECT mime_type, file_name FROM items WHERE id = ? AND status = 'published' AND ${kind}`).bind(id).first();
   if (!item) throw new HttpError(404, 'Not found.');
+  const headers = { ...HEADERS, 'Content-Type': item.mime_type };
+  if (download) {
+    const name = encodeURIComponent(item.file_name).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16));
+    headers['Content-Type'] = 'application/octet-stream';
+    headers['Content-Disposition'] = `attachment; filename="attachment"; filename*=UTF-8''${name}`;
+  }
   const { results } = await env.DB.prepare('SELECT data FROM image_chunks WHERE item_id = ? ORDER BY part').bind(id).all();
   const stream = new ReadableStream({ start(controller) { for (const row of results) controller.enqueue(Buffer.from(row.data,'base64')); controller.close(); } });
-  return new Response(stream, { headers: { ...HEADERS, 'Content-Type': item.mime_type } });
+  return new Response(stream, { headers });
 }
 
 export default {
@@ -311,6 +324,7 @@ export default {
       if (request.method === 'GET' && pathname === '/api/items') return await collection(request, env, context);
       if (request.method === 'GET' && pathname.startsWith('/embed/substack/')) return await substackEmbed(request, pathname.slice('/embed/substack/'.length), env);
       if (request.method === 'GET' && pathname.startsWith('/media/')) return await media(pathname.slice(7), env);
+      if (request.method === 'GET' && pathname.startsWith('/files/')) return await media(pathname.slice(7), env, true);
       if (request.method === 'GET' && pathname === '/api/health') { await env.DB.prepare('SELECT 1').first(); return json({ ok: true }); }
       if (['GET','HEAD'].includes(request.method) && assets[pathname]) {
         const [body, type] = assets[pathname];

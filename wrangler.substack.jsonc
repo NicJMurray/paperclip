@@ -3,11 +3,13 @@
   "name": "paperclip-substack-likes",
   "main": "server/substack-cron.js",
   "compatibility_date": "2026-11-16",
+  "keep_names": false,
   "workers_dev": false,
   "preview_urls": false,
   "observability": {
     "enabled": true
   },
+  "browser": { "binding": "BROWSER" },
   "d1_databases": [
     {
       "binding": "DB",
@@ -18,7 +20,7 @@
   ],
   "triggers": {
     "crons": [
-      "17 7 * * MON,THU"
+      "17 7 * * *"
     ]
   }
 }

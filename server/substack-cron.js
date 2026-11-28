@@ -1,36 +1,6 @@
 import { SUBSTACK_PROFILE, refreshSubstack } from './substack.js';
 
-const PROFILE_ID = 361029705;
-const PROFILE_LIKES_PAGE = SUBSTACK_PROFILE + '?tab=likes';
-const LIKES_URL = new URL('/api/v1/reader/feed/profile/' + PROFILE_ID, SUBSTACK_PROFILE);
-LIKES_URL.searchParams.set('types[]', 'like');
-const MAX_PAGES = 20;
-
-async function publicResponse(fetchPage, url, accept, signal) {
-  const response = await fetchPage(url, { headers: { Accept: accept }, redirect: 'manual', cache: 'no-store', signal });
-  if (!response.ok || !response.headers.get('content-type')?.includes(accept)) {
-    throw new Error('Unexpected Substack response (' + response.status + ')');
-  }
-  return response;
-}
-
-async function responseText(response, limit) {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('Missing Substack response body');
-  const decoder = new TextDecoder();
-  let bytes = 0;
-  let text = '';
-  for (;;) {
-    const {value, done} = await reader.read();
-    if (done) return text + decoder.decode();
-    bytes += value.byteLength;
-    if (bytes > limit) {
-      await reader.cancel();
-      throw new Error('Substack response too large');
-    }
-    text += decoder.decode(value, {stream: true});
-  }
-}
+const source = { profile: SUBSTACK_PROFILE, id: 361029705, handle: 'nicjm' };
 
 function publicVideo(upload, host = 'substack.com', poster = null) {
   if (upload?.state !== 'transcoded' || upload.copyright_infringement ||
@@ -94,28 +64,44 @@ function likedItem(item) {
   };
 }
 
-export async function publicLikes(fetchPage = fetch, signal = AbortSignal.timeout(30000)) {
-  const profilePage = await publicResponse(fetchPage, PROFILE_LIKES_PAGE, 'text/html', signal);
-  const html = await responseText(profilePage, 512 * 1024);
+export async function publicLikes({ page }, source, toItem) {
+  let destination;
+  await page.setJavaScriptEnabled(false);
+  await page.setRequestInterception(true);
+  page.on('request', request => request.isNavigationRequest() && request.url() === destination
+    ? request.continue() : request.abort());
+
+  async function readPage(url, contentType, limit) {
+    destination = url;
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    if (!response?.ok() || response.url() !== url || !response.headers()['content-type']?.includes(contentType)) {
+      throw new Error('Unexpected Substack response (' + (response?.status() ?? 'empty') + ')');
+    }
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > limit) throw new Error('Substack response too large');
+    return text;
+  }
+
+  const html = await readPage(source.profile + '?tab=likes', 'text/html', 512 * 1024);
   const data = html.match(/<script[^>]+id="preloads-json"[^>]*>([^]*?)<\/script>/i)?.[1];
   const profile = data && JSON.parse(data).profile;
-  if (!profile || profile.id !== PROFILE_ID || profile.handle !== 'nicjm' || typeof profile.hasLikes !== 'boolean') {
+  if (!profile || profile.id !== source.id || profile.handle !== source.handle || typeof profile.hasLikes !== 'boolean') {
     throw new Error('Substack public profile format changed');
   }
   const items = [];
-  const snapshot = {profile: SUBSTACK_PROFILE, complete: true, items};
+  const snapshot = {profile: source.profile, complete: true, items};
   if (profile.profile_disabled || !profile.hasLikes) return snapshot;
 
-  const next = new URL(LIKES_URL);
+  const next = new URL('/api/v1/reader/feed/profile/' + source.id, source.profile);
+  next.searchParams.set('types[]', 'like');
   const cursors = new Set();
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const result = await publicResponse(fetchPage, next.href, 'application/json', signal);
-    const {items: entries, nextCursor} = JSON.parse(await responseText(result, 3 * 1024 * 1024));
+  for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const {items: entries, nextCursor} = JSON.parse(await readPage(next.href, 'application/json', 3 * 1024 * 1024));
     if (!Array.isArray(entries) || (nextCursor !== null && typeof nextCursor !== 'string')) {
       throw new Error('Substack likes list format changed');
     }
     for (const item of entries) {
-      const like = likedItem(item);
+      const like = toItem(item);
       if (like) items.push(like);
     }
     if (!nextCursor) return snapshot;
@@ -126,12 +112,32 @@ export async function publicLikes(fetchPage = fetch, signal = AbortSignal.timeou
   throw new Error('Substack likes exceeded pagination limit');
 }
 
+// Browser Run executes this script in one signed-out browser session.
+export const likesBrowserScript = `async context => {
+  const publicVideo = ${publicVideo};
+  return (${publicLikes})(context, ${JSON.stringify(source)}, ${likedItem});
+}`;
+
 export default {
   async scheduled(_event, env) {
-    await refreshSubstack(env, LIKES_URL, async () => {
-      const snapshot = await publicLikes();
-      console.info(JSON.stringify({event: 'substack_public_snapshot', items: snapshot.items.length}));
-      return Response.json(snapshot);
+    let count;
+    await refreshSubstack(env, new URL(SUBSTACK_PROFILE), async () => {
+      const response = await env.BROWSER.script(likesBrowserScript, {
+        library: 'puppeteer', timeout: 40000, keepAlive: 10000,
+      });
+      const session = response.headers.get('cf-browser-session-id');
+      try {
+        if (!response.ok) throw new Error('Substack browser request failed (' + response.status + ')');
+        const { success, result } = await response.json();
+        if (!success || !Array.isArray(result?.items)) throw new Error('Invalid Substack browser result');
+        count = result.items.length;
+        return Response.json(result);
+      } finally {
+        if (session) await env.BROWSER.closeSession(session).catch(() => {
+          console.warn(JSON.stringify({event: 'substack_browser_close_failed'}));
+        });
+      }
     });
+    if (count !== undefined) console.info(JSON.stringify({event: 'substack_public_snapshot', items: count}));
   },
 };

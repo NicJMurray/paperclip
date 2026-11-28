@@ -46,7 +46,7 @@ final class Network {
         write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"\r\n\r\n"+value+"\r\n");
     }
     private static void file(OutputStream out,String boundary,String name,File file,String mime)throws IOException{
-        write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"; filename=\"image\"\r\nContent-Type: "+mime+"\r\n\r\n");
+        write(out,"--"+boundary+"\r\nContent-Disposition: form-data; name=\""+name+"\"; filename=\"attachment\"\r\nContent-Type: "+mime+"\r\n\r\n");
         try(InputStream in=new FileInputStream(file)){byte[] buffer=new byte[32768];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);}write(out,"\r\n");
     }
     static Response upload(File dir,JSONObject meta,String token)throws Exception{
@@ -55,8 +55,16 @@ final class Network {
             c.setRequestMethod("POST");c.setDoOutput(true);c.setChunkedStreamingMode(32768);c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
             try(OutputStream out=new BufferedOutputStream(c.getOutputStream())){
                 field(out,boundary,"id",meta.getString("id"));field(out,boundary,"text",meta.optString("text"));field(out,boundary,"title",meta.optString("title"));
-                File image=new File(dir,"image");if(image.isFile())file(out,boundary,"file",image,meta.optString("mime","image/jpeg"));
-                File preview=new File(dir,"preview.jpg");if(preview.isFile())file(out,boundary,"preview",preview,"image/jpeg");
+                File attachment = new File(dir, "attachment");
+                if (attachment.isFile()) {
+                    field(out, boundary, "file_name", meta.getString("file_name"));
+                    file(out, boundary, "file", attachment, "application/octet-stream");
+                } else {
+                    File image = new File(dir, "image");
+                    if (image.isFile()) file(out, boundary, "file", image, meta.optString("mime", "image/jpeg"));
+                    File preview = new File(dir, "preview.jpg");
+                    if (preview.isFile()) file(out, boundary, "preview", preview, "image/jpeg");
+                }
                 write(out,"--"+boundary+"--\r\n");
             }return response(c);
         }finally{c.disconnect();}

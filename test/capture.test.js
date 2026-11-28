@@ -19,7 +19,7 @@ const call = async (path, options) => {
 before(async()=>{
   mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: new URL('../dist/_worker.js',import.meta.url).pathname, compatibilityDate:'2026-10-30', compatibilityFlags:['nodejs_compat'], d1Databases:{DB:'paperclip-test'} }));
   db = await mf.getD1Database('DB');
-  for (const file of ['0001_initial.sql','0002_queue_removal.sql']) {
+  for (const file of ['0001_initial.sql','0002_queue_removal.sql','0004_shared_files.sql']) {
     const sql = await readFile(new URL('../server/migrations/'+file,import.meta.url),'utf8');
     for (const statement of sql.split(';').map(s=>s.trim()).filter(Boolean)) await db.prepare(statement).run();
   }
@@ -74,6 +74,44 @@ test('standalone images publish without a title or a caption',async()=>{
   assert.equal((await send(body)).status,201);
   const items=(await (await call('/api/items?category=images')).json()).items;
   assert.deepEqual(items.map(item=>[item.id,item.title,item.summary]),[[id,'Image',null]]);
+});
+test('shared documents publish original bytes with their name, caption and link', async () => {
+  const id = randomUUID(), url = 'https://example.org/source';
+  const bytes = Buffer.alloc(600000, 65);
+  Buffer.from('%PDF-1.7').copy(bytes);
+  const body = form(id, 'Reference copy: ' + url);
+  body.set('file', new Blob([bytes], {type: 'application/pdf'}), 'attachment');
+  body.set('file_name', 'Résumé.pdf');
+
+  assert.equal((await send(body)).status, 201);
+  assert.equal((await send(body)).status, 200);
+  const items = await (await call('/api/items?category=files&q=' + encodeURIComponent('Résumé.pdf'))).json();
+  assert.deepEqual(items.items.map(item => [item.id, item.kind, item.title, item.url, item.file_name, item.file_url]),
+    [[id, 'file', 'A shared find', url, 'Résumé.pdf', '/files/' + id]]);
+  const download = await call('/files/' + id);
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get('Content-Type'), 'application/octet-stream');
+  assert.match(download.headers.get('Content-Disposition'), /^attachment;.*R%C3%A9sum%C3%A9\.pdf$/);
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+  assert.equal((await call('/media/' + id)).status, 404);
+});
+test('non-image attachments stay download-only and unpublished files stay private', async () => {
+  const id = randomUUID();
+  const body = form(id, '');
+  body.delete('title');
+  body.set('file_name', 'example.html');
+  body.set('file', new Blob(['<h1>An HTML file</h1>'], {type: 'image/png'}), 'attachment');
+
+  assert.equal((await send(body)).status, 201);
+  const download = await call('/files/' + id);
+  assert.equal(download.headers.get('Content-Type'), 'application/octet-stream');
+  assert.equal(download.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(await download.text(), '<h1>An HTML file</h1>');
+  assert.equal((await call('/media/' + id)).status, 404);
+  await db.prepare("UPDATE items SET status = 'held' WHERE id = ?").bind(id).run();
+  assert.equal((await call('/files/' + id)).status, 404);
+  assert.equal((await (await call('/api/items?q=example.html')).json()).items.length, 0);
+  await discard(id);
 });
 test('rejects executable image formats and oversized text',async()=>{
   assert.equal((await send(form(randomUUID(),'x',Buffer.from('<svg onload="alert(1)"></svg>')))).status,415);

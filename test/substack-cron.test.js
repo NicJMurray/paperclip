@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { publicLikes } from '../server/substack-cron.js';
+import { likesBrowserScript } from '../server/substack-cron.js';
 import { normalizeSubstackFeed } from '../server/substack.js';
 
 const date = '2026-10-01T08:00:00.000Z';
@@ -21,6 +21,25 @@ const post = {
     post_date:date, title:'Original title', subtitle:'Original subtitle.'},
 };
 const page = (items, nextCursor = null) => Response.json({items, nextCursor});
+const runScript = new Function('return ' + likesBrowserScript)();
+const publicLikes = fetchPage => runScript({page: {
+  async setJavaScriptEnabled(enabled) { assert.equal(enabled, false); },
+  async setRequestInterception(enabled) { assert.equal(enabled, true); },
+  on(event, intercept) {
+    assert.equal(event, 'request');
+    intercept({isNavigationRequest: () => false, abort() {}});
+  },
+  async goto(url) {
+    const response = await fetchPage(url);
+    return {
+      ok: () => response.ok,
+      status: () => response.status,
+      url: () => response.headers.get('location') || url,
+      headers: () => Object.fromEntries(response.headers),
+      text: () => response.text(),
+    };
+  },
+}});
 
 test('public likes follow Substack cursors and preserve original media', async () => {
   const calls = [];
@@ -54,8 +73,7 @@ test('the public likes reader honors profile visibility and rejects incomplete l
   const reply = url => new URL(url).href === first.href ? profile(true) : page([note], 'same-cursor');
   await assert.rejects(publicLikes(reply), /cursor repeated/);
   await assert.rejects(publicLikes(() => new Response('', {status:429})), /429/);
-  await assert.rejects(publicLikes((_url, request) => {
-    assert.equal(request.redirect, 'manual');
-    return new Response(null, {status:302, headers:{location:'https://substack.com/sign-in'}});
-  }), /302/);
+  await assert.rejects(publicLikes(() => new Response(null, {
+    status: 302, headers: {location: 'https://substack.com/sign-in'},
+  })), /302/);
 });

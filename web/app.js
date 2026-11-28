@@ -357,6 +357,13 @@ function card(item) {
   content.append(head);
   if (!item.source || item.title) content.append(h2);
   if (item.summary) content.append(element('p','',item.summary));
+  if (item.file_url) {
+    const link = element('a', 'file-download', item.title === item.file_name ? 'Download' : `Download ${item.file_name}`);
+    link.href = `/files/${encodeURIComponent(item.id)}`;
+    link.download = item.file_name;
+    link.setAttribute('aria-label', `Download ${item.file_name}`);
+    content.append(link);
+  }
   if (showMedia) {
     for (const attachment of attachments.slice(0, 6)) {
       const figure = importedMedia(attachment, url, item.title);
@@ -371,7 +378,7 @@ function card(item) {
   const host = url?.hostname.replace(/^www\./, '');
   const attribution = item.source && url
     ? sourceLink(url, host === 'substack.com' ? 'Substack' : 'Substack · ' + host, 'source-link')
-    : element('span', '', host || (item.kind === 'image' ? 'A saved image' : 'A saved note'));
+    : element('span', '', host || (item.kind === 'image' ? 'A saved image' : item.file_url ? '' : 'A saved note'));
   source.append(attribution, element('span','',Number.isNaN(+date) ? '' : date.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})));
   content.append(source); article.append(content); return article;
 }

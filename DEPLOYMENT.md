@@ -14,7 +14,7 @@ Pages reuses the account’s existing GitHub authorisation. A separate Workers B
 
 ## Database migrations
 
-Apply the SQL files in `server/migrations/` in filename order before deploying code that needs them. `0001_initial.sql` creates the archive; `0002_queue_removal.sql` adds durable removal IDs so a delayed upload cannot recreate a removed item. Future schema changes should be additive. Use `npm run db:remote` with a D1-capable Cloudflare credential, or the connected Cloudflare API query endpoint. A code push does not run database migrations automatically.
+Apply the SQL files in `server/migrations/` in filename order before deploying code that needs them. `0001_initial.sql` creates the archive. `0002_queue_removal.sql` adds durable removal IDs. `0003_external_feed.sql` adds Substack snapshots. `0004_shared_files.sql` adds names for uploaded files. Use `npm run db:remote` with a D1-capable Cloudflare credential, or the connected Cloudflare API query endpoint. A code push does not run database migrations automatically.
 
 ## Pair a phone
 
@@ -42,7 +42,7 @@ Android keeps removal markers separately from its outbox files, so an upload fin
 
 ## Android publishing
 
-The authenticated `POST /api/capture` endpoint publishes a share in the same database batch that stores its image chunks. It uses the title and text supplied by Android and displays the URL when a link has no title. The former `paperclip-inbox-curator` schedule is retired. The private queue endpoints still support legacy unpublished records and offline removal requests.
+The authenticated `POST /api/capture` endpoint publishes a share in the same database batch that stores its file chunks. It uses the title and text supplied by Android and displays a filename or URL when a share has no title. Android 1.2 sends a `file_name` field for any file. Supported images display at `/media/:id`. Other files download as attachments from `/files/:id`. Both routes require a published record. The private queue endpoints still support legacy unpublished records and offline removal requests.
 
 ## Publishing and verifying code
 
@@ -52,7 +52,7 @@ Android builds are independent of the website. The release APK is signed with th
 
 ## Substack likes
 
-The `paperclip-substack-likes` Worker reads the signed-out `@nicjm` profile and the public likes data used by Substack's web app. It has no public routes. Its Cron Trigger runs Mondays and Thursdays at 07:17 UTC and writes a complete snapshot into the same D1 database. It uses no Substack login or cookies. If the profile stops showing likes in public it clears the import; an HTTP, parsing or pagination failure preserves the last complete snapshot. Only publicly visible Notes and published posts with an everyone audience are imported. The Worker follows at most 20 pages per refresh and preserves the publication's wording and source links.
+The `paperclip-substack-likes` Worker reads the signed-out `@nicjm` profile and the public likes data used by Substack's web app. It has no public routes. Its Cron Trigger runs daily at 07:17 UTC and writes a complete snapshot into the same D1 database. Each refresh uses one short-lived Browser Run session with scripts and subresources disabled. If the profile stops showing likes in public it clears the import. An HTTP, parsing or pagination failure preserves the last complete snapshot. Only publicly visible Notes and published posts with an everyone audience are imported. The Worker follows at most 20 pages per refresh and preserves the publication's wording and source links.
 
 The production Pages project reads that snapshot when `SUBSTACK_CRON_FEED` is `1`. To pause refresh, remove the Worker Cron Trigger. To hide imported items, also remove the flag from `wrangler.jsonc` and redeploy Pages. The custom Worker configuration is `wrangler.substack.jsonc` and can be deployed with `npx wrangler deploy --config wrangler.substack.jsonc`. Apply `0003_external_feed.sql` before enabling the Worker on a fresh database. The Cloudflare Worker logs and D1 table `feed_sync` show recent attempts. The source is an undocumented web route and may change.
 
